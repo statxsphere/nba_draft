@@ -3,7 +3,7 @@ import requests
 import pandas as pd
 
 
-class ScrapingModule:
+class TScrapingModule:
     def __init__(self):
         self.years = list(range(2004, 2021))
         self.name = []
@@ -22,6 +22,12 @@ class ScrapingModule:
         self.usg = []
         self.obp = []
         self.dbp = []
+        self.links = []
+        self.wing = []
+        self.FT = []
+        self.tpp = []
+        self.tpa = []
+        self.fta = []
         self.df = pd.DataFrame()
 
     def collect_singleyr_stats(self, year):
@@ -31,6 +37,12 @@ class ScrapingModule:
         # name
         for names in soup.find_all('div', class_='mock-row-name'):
             self.name.append(names.text)
+
+        # links
+        for links in soup.find_all('a', class_='primary-hover'):
+            if links.has_attr('href'):
+                if 'player' in links['href']:
+                    self.links.append(f"http://www.tankathon.com/{links['href']}")
 
         # position
         for positions in soup.find_all('div', class_='mock-row-school-position'):
@@ -134,6 +146,44 @@ class ScrapingModule:
             self.collect_singleyr_stats(year)
             print('Done! Moving On.')
 
+    def collect_from_links(self):
+        i = 1
+        for link in self.links:
+            print(f'starting player{i}..')
+            f = requests.get(link).text
+            s = BeautifulSoup(f, 'lxml')
+            FT = None
+            T3P = None
+            P3A = None
+            FTA = None
+            wing = None
+            for stat in s.find_all('div', class_='stat-container'):
+                if stat.find('div', class_='stat-label').text == "FT%":
+                    FT = stat.find('div', class_='stat-data').text
+                if stat.find('div', class_='stat-label').text == "3P%":
+                    T3P = stat.find('div', class_='stat-data').text
+                if "3PA" in stat.find('div', class_='stat-label').text:
+                    P3A = stat.find('div', class_='stat-data').text
+                if "FTA" in stat.find('div', class_='stat-label').text:
+                    FTA = stat.find('div', class_='stat-data').text
+
+            self.FT.append(FT)
+            self.tpp.append(T3P)
+            self.tpa.append(P3A)
+            self.fta.append(FTA)
+
+            for stat in s.find_all('span'):
+                if 'wingspan' in stat.text:
+                    wing = stat.text[1:-9]
+            if wing:
+                wing1 = wing.replace('"', '').split("'")
+                wing2 = int(wing1[0]) * 12 + float(wing1[1])
+                self.wing.append(round(wing2 * 2.54, 1))
+            else:
+                self.wing.append(wing)
+            print('done')
+            i += 1
+
     def set_years(self):
         input1 = int(input('Enter starting year: '))
         input2 = int(input('Enter ending year: '))
@@ -142,9 +192,14 @@ class ScrapingModule:
     def final_call(self):
         self.set_years()
         self.collect_all()
+        print(f'no of. players is {len(self.name)}')
+        print('starting link collection')
+        self.collect_from_links()
         statdict = {'name': self.name, 'position': self.position, 'pick': self.pick, 'height_cm': self.height,
-                    'weight_lb': self.weight, 'c_year': self.c_year, 'age': self.age, 'points': self.points,
-                    'reb': self.rebounds, 'ast': self.assists, 'TS': self.ts, 'usg': self.usg, 'o_bpm': self.obp,
-                    'd_bpm': self.dbp}
+                    'wingspan_cm': self.wing, 'weight_lb': self.weight, 'c_year': self.c_year, 'age': self.age,
+                    'points': self.points, 'reb': self.rebounds, 'ast': self.assists, 'TS': self.ts, 'usg': self.usg,
+                    'o_bpm': self.obp, 'd_bpm': self.dbp, '3p%': self.tpp, 'ft%': self.FT, '3pa': self.tpa,
+                    'fta': self.fta}
+
         self.df = pd.DataFrame(statdict)
         return self.df
