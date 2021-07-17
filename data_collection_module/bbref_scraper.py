@@ -29,4 +29,4 @@ class BbScrape:
 if __name__ == '__main__':
     scrape_obj = BbScrape()
     scrape_obj.final_call()
-    scrape_obj.final_df.to_csv('data/bb_ref.csv')
+    scrape_obj.final_df.to_csv('data/bb_ref.csv', index=False)

@@ -3,9 +3,9 @@ import requests
 import pandas as pd
 
 
-class TScrapingModule:
+class TankathonScrape:
     def __init__(self):
-        self.years = list(range(2004, 2021))
+        self.years = list(range(2011, 2019))
         self.name = []
         self.position = []
         self.pick = []
@@ -33,7 +33,6 @@ class TScrapingModule:
     def collect_singleyr_stats(self, year):
         file = requests.get(f"http://www.tankathon.com/past_drafts/{str(year)}").text
         soup = BeautifulSoup(file, 'lxml')
-        i = 1
         # name
         for names in soup.find_all('div', class_='mock-row-name'):
             self.name.append(names.text)
@@ -203,3 +202,9 @@ class TScrapingModule:
 
         self.df = pd.DataFrame(statdict)
         return self.df
+
+
+if __name__ == "__main__":
+    scrape_obj = TankathonScrape()
+    finaldf = scrape_obj.final_call()
+    finaldf.to_csv(f'data/tankathon.csv', index=False)

@@ -71,5 +71,9 @@ class NbaScrape:
                                                  'AST', 'SecondaryAST', 'AST', 'ASTToPass%']])
         del pas_url, passes
 
-    # def collect_isolation(self, year):
+    def collect_isolation(self, year):
+        pass
+
+    def final_call(self):
+        pass
 
