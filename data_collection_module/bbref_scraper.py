@@ -23,7 +23,9 @@ class BbScrape:
 
     def final_call(self):
         for i in self.years:
+            print(f'Working on year: {i}..')
             self.collect_stats(i)
+            print('Done!')
 
 
 if __name__ == '__main__':
