@@ -188,7 +188,8 @@ class TankathonScrape:
             print('done')
             i += 1
 
-    def scrape_link(self, file):
+    def scrape_link(self, x):
+        file = requests.get(x).text
         soup = BeautifulSoup(file, 'lxml')
         # name
         for names in soup.find_all('div', class_='mock-row-name'):
