@@ -159,13 +159,13 @@ class TankathonScrape:
             wing = None
             g = None
             for stat in s.find_all('div', class_='stat-container'):
-                if stat.find('div', class_='stat-label').text == "ft%":
+                if stat.find('div', class_='stat-label').text == "FT%":
                     ft = stat.find('div', class_='stat-data').text
                 if stat.find('div', class_='stat-label').text == "3P%":
                     t3p = stat.find('div', class_='stat-data').text
                 if "3PA" in stat.find('div', class_='stat-label').text:
                     p3a = stat.find('div', class_='stat-data').text
-                if "fta" in stat.find('div', class_='stat-label').text:
+                if "FTA" in stat.find('div', class_='stat-label').text:
                     fta = stat.find('div', class_='stat-data').text
                 if stat.find('div', class_='stat-label').text == "G":
                     g = stat.find('div', class_='stat-data').text
