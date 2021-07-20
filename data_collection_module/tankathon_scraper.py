@@ -296,6 +296,15 @@ class TankathonScrape:
             except:
                 self.dbp.append(None)
 
+        self.collect_from_links()
+        statdict = {'name': self.name, 'position': self.position, 'pick': self.pick, 'height_cm': self.height,
+                    'wingspan_cm': self.wing, 'weight_lb': self.weight, 'c_year': self.c_year, 'age': self.age,
+                    'points': self.points, 'reb': self.rebounds, 'ast': self.assists, 'TS': self.ts, 'usg': self.usg,
+                    'o_bpm': self.obp, 'd_bpm': self.dbp, '3p%': self.tpp, 'ft%': self.ft, '3pa': self.tpa,
+                    'fta': self.fta}
+
+        self.df = pd.DataFrame(statdict)
+
     def set_years(self):
         input1 = int(input('Enter starting year: '))
         input2 = int(input('Enter ending year: '))
