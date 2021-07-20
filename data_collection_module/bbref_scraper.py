@@ -6,7 +6,7 @@ import pandas as pd
 class BbScrape:
     def __init__(self):
         self.final_df = pd.DataFrame()
-        self.years = [a for a in range(2012, 2022)]
+        self.years = [a for a in range(2005, 2022)]
 
     def collect_stats(self, year):
         url = f"https://www.basketball-reference.com/leagues/NBA_{year}_advanced.html"
