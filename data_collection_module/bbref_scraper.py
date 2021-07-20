@@ -19,7 +19,8 @@ class BbScrape:
         headerlist = [h.replace('\xa0', '') for h in headerlist][1:]
         rows = table.findAll('tr')[1:]
         stats = [[td.getText().strip() for td in rows[i].findAll('td')] for i in range(len(rows))]
-        self.final_df.append(pd.DataFrame(stats, columns=headerlist))
+        df = pd.DataFrame(stats, columns=headerlist)
+        self.final_df = self.final_df.append(df)
 
     def final_call(self):
         for i in self.years:
