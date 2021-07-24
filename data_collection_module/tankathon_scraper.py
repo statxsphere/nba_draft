@@ -206,7 +206,7 @@ class TankathonScrape:
             self.position.append(positions.text[0:2].rstrip())
 
         # pick
-        for i in range(1, 61):
+        for i in range(1, len(self.name) + 1):
             self.pick.append(i)
 
         # measurements
@@ -300,9 +300,9 @@ class TankathonScrape:
         self.collect_from_links()
         statdict = {'name': self.name, 'position': self.position, 'pick': self.pick, 'height_cm': self.height,
                     'wingspan_cm': self.wing, 'weight_lb': self.weight, 'c_year': self.c_year, 'age': self.age,
-                    'points': self.points, 'reb': self.rebounds, 'ast': self.assists, 'steals': self.steals,
-                    'blocks': self.blocks, 'TS': self.ts, 'usg': self.usg, 'o_bpm': self.obp, 'd_bpm': self.dbp,
-                    '3p%': self.tpp, 'ft%': self.ft, '3pa': self.tpa, 'fta': self.fta}
+                    'games': self.games, 'points': self.points, 'reb': self.rebounds, 'ast': self.assists,
+                    'steals': self.steals, 'blocks': self.blocks, 'TS': self.ts, 'usg': self.usg, 'o_bpm': self.obp,
+                    'd_bpm': self.dbp, '3p%': self.tpp, 'ft%': self.ft, '3pa': self.tpa, 'fta': self.fta}
 
         self.df = pd.DataFrame(statdict)
 
@@ -322,9 +322,9 @@ class TankathonScrape:
         self.collect_from_links()
         statdict = {'name': self.name, 'position': self.position, 'pick': self.pick, 'height_cm': self.height,
                     'wingspan_cm': self.wing, 'weight_lb': self.weight, 'c_year': self.c_year, 'age': self.age,
-                    'points': self.points, 'reb': self.rebounds, 'ast': self.assists, 'steals': self.steals,
-                    'blocks':self.blocks, 'TS': self.ts, 'usg': self.usg, 'o_bpm': self.obp, 'd_bpm': self.dbp,
-                    '3p%': self.tpp, 'ft%': self.ft, '3pa': self.tpa, 'fta': self.fta}
+                    'games':self.games, 'points': self.points, 'reb': self.rebounds, 'ast': self.assists,
+                    'steals': self.steals, 'blocks':self.blocks, 'TS': self.ts, 'usg': self.usg, 'o_bpm': self.obp,
+                    'd_bpm': self.dbp, '3p%': self.tpp, 'ft%': self.ft, '3pa': self.tpa, 'fta': self.fta}
 
         self.df = pd.DataFrame(statdict)
         return self.df
