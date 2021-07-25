@@ -25,6 +25,7 @@ class TankathonScrape:
         self.links = []
         self.wing = []
         self.games = []
+        self.mp = []
         self.ft = []
         self.tpp = []
         self.tpa = []
@@ -169,12 +170,15 @@ class TankathonScrape:
                     fta = stat.find('div', class_='stat-data').text
                 if stat.find('div', class_='stat-label').text == "G":
                     g = stat.find('div', class_='stat-data').text
+                if stat.find('div', class_='stat-label').text == "MP":
+                    mp = stat.find('div', class_='stat-data').text
 
             self.ft.append(ft)
             self.tpp.append(t3p)
             self.tpa.append(p3a)
             self.fta.append(fta)
             self.games.append(g)
+            self.mp.append(mp)
 
             for stat in s.find_all('span'):
                 if 'wingspan' in stat.text:
@@ -322,7 +326,7 @@ class TankathonScrape:
         self.collect_from_links()
         statdict = {'name': self.name, 'position': self.position, 'pick': self.pick, 'height_cm': self.height,
                     'wingspan_cm': self.wing, 'weight_lb': self.weight, 'c_year': self.c_year, 'age': self.age,
-                    'games':self.games, 'points': self.points, 'reb': self.rebounds, 'ast': self.assists,
+                    'games': self.games, 'mp':self.mp, 'points': self.points, 'reb': self.rebounds, 'ast': self.assists,
                     'steals': self.steals, 'blocks':self.blocks, 'TS': self.ts, 'usg': self.usg, 'o_bpm': self.obp,
                     'd_bpm': self.dbp, '3p%': self.tpp, 'ft%': self.ft, '3pa': self.tpa, 'fta': self.fta}
 
