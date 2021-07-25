@@ -159,6 +159,8 @@ class TankathonScrape:
             fta = None
             wing = None
             g = None
+            mp = None
+
             for stat in s.find_all('div', class_='stat-container'):
                 if stat.find('div', class_='stat-label').text == "FT%":
                     ft = stat.find('div', class_='stat-data').text
@@ -304,7 +306,8 @@ class TankathonScrape:
         self.collect_from_links()
         statdict = {'name': self.name, 'position': self.position, 'pick': self.pick, 'height_cm': self.height,
                     'wingspan_cm': self.wing, 'weight_lb': self.weight, 'c_year': self.c_year, 'age': self.age,
-                    'games': self.games, 'points': self.points, 'reb': self.rebounds, 'ast': self.assists,
+                    'games': self.games, 'mp': self.mp, 'points': self.points, 'reb': self.rebounds,
+                    'ast': self.assists,
                     'steals': self.steals, 'blocks': self.blocks, 'TS': self.ts, 'usg': self.usg, 'o_bpm': self.obp,
                     'd_bpm': self.dbp, '3p%': self.tpp, 'ft%': self.ft, '3pa': self.tpa, 'fta': self.fta}
 
