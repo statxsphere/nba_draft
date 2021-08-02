@@ -160,6 +160,7 @@ class TankathonScrape:
             wing = None
             g = None
             mp = None
+            mp1 = []
 
             for stat in s.find_all('div', class_='stat-container'):
                 if stat.find('div', class_='stat-label').text == "FT%":
@@ -173,14 +174,17 @@ class TankathonScrape:
                 if stat.find('div', class_='stat-label').text == "G":
                     g = stat.find('div', class_='stat-data').text
                 if stat.find('div', class_='stat-label').text == "MP":
-                    mp = stat.find('div', class_='stat-data').text
+                    mp1.append(stat.find('div', class_='stat-data').text)
 
             self.ft.append(ft)
             self.tpp.append(t3p)
             self.tpa.append(p3a)
             self.fta.append(fta)
             self.games.append(g)
-            self.mp.append(mp)
+            if mp1:
+                self.mp.append(mp1[0])
+            else:
+                self.mp.append(mp)
 
             for stat in s.find_all('span'):
                 if 'wingspan' in stat.text:
