@@ -33,6 +33,7 @@ INNER_CLASSES = 6      # tuning only ever looks at the last 6 classes before the
 TRIALS = 40
 ALPHAS = [1, 3, 10, 30, 100, 300, 1000]
 WEIGHTS = np.round(np.arange(0, 1.01, 0.1), 1)
+LEVEL = 0.8            # the ranges are 80% intervals
 
 TARGETS = {'peak': 'peak_vorp', 'imm': 'imm_vorp', 'bpm': 'peak_bpm'}
 FLOORS = {'peak': 0.0, 'imm': 0.0, 'bpm': -2.0}   # replacement level for each target
@@ -164,7 +165,7 @@ def slot_params(train, target, feats, params):
     return dict(params, w=float(WEIGHTS[int(np.argmax(rhos))]))
 
 
-# ---------- ranges from out of fold score slices ----------
+# ---------- ranges: conformalised quantile regression ----------
 
 def oof_scores(train, target, feats, params):
     oof = np.zeros(len(train))
@@ -176,27 +177,50 @@ def oof_scores(train, target, feats, params):
     return oof
 
 
-def vorp_map(score, y):
-    # 20 slices of the score: what past players in each slice averaged, and their 10th and 90th percentiles
+def quantile_curve(score, y, q):
+    bins = pd.qcut(pd.Series(score).rank(method='first'), 10, labels=False).values
+    t = pd.DataFrame({'score': score, 'y': y, 'bin': bins}).groupby('bin')
+    return t['score'].mean().values, np.maximum.accumulate(t['y'].quantile(q).values)
+
+
+def conformal(score, y, years, floor, level=LEVEL):
+    # percentile curves of the outcome against the score, from half the training classes. then the
+    # other half, the most recent class included, picks how wide those curves need to be for 80% of
+    # its players to land inside. so many careers sit at replacement level that a plain 10th to 90th
+    # range covers far more than 80%, and this sorts that out
+    cal = (years.max() - years) % 2 == 0
+    need = np.ceil((cal.sum() + 1) * level) / cal.sum()
+    for t in np.arange(0.3, 1.001, 0.01):
+        xs, lo = quantile_curve(score[~cal], y[~cal], (1 - t) / 2)
+        _, hi = quantile_curve(score[~cal], y[~cal], (1 + t) / 2)
+        inside = (y[cal] >= np.interp(score[cal], xs, lo)) & (y[cal] <= np.interp(score[cal], xs, hi))
+        if inside.mean() >= need:
+            break
+    return {'q_score': xs, 'q_low': np.maximum(lo, floor), 'q_high': hi, 'q_level': float(t), 'floor': floor}
+
+
+def vorp_map(score, y, years, floor):
+    # 20 slices of the score and what past players in each slice averaged, plus the conformal range
     bins = pd.qcut(pd.Series(score).rank(method='first'), 20, labels=False).values
     t = pd.DataFrame({'score': score, 'y': y, 'bin': bins}).groupby('bin')
-    m = {'score': t['score'].mean().values,
-         'vorp': t['y'].mean().values,
-         'low': t['y'].quantile(0.1).values,
-         'high': t['y'].quantile(0.9).values}
-    # a better score should never mean a worse outcome
-    for k in ['vorp', 'low', 'high']:
-        m[k] = np.maximum.accumulate(m[k])
+    m = {'score': t['score'].mean().values, 'vorp': np.maximum.accumulate(t['y'].mean().values)}
+    m.update(conformal(score, y, years, floor))
     return m
 
 
+def ranges(score, m):
+    low = np.interp(score, m['q_score'], m['q_low'])
+    high = np.interp(score, m['q_score'], m['q_high'])
+    return low, high
+
+
 def to_vorp(score, m):
-    xs = np.asarray(m['score'])
-    mid, low, high = [np.interp(score, xs, np.asarray(m[k])) for k in ['vorp', 'low', 'high']]
+    xs, ys = np.asarray(m['score']), np.asarray(m['vorp'])
+    mid = np.interp(score, xs, ys)
     # keep the last slope going past the top slice so the best prospects don't all tie
-    ys = np.asarray(m['vorp'])
     slope = (ys[-1] - ys[-2]) / (xs[-1] - xs[-2])
     mid = np.where(score > xs[-1], ys[-1] + slope * (score - xs[-1]), mid)
+    low, high = ranges(score, m)
     return mid, np.minimum(low, mid), np.maximum(high, mid)
 
 
@@ -302,12 +326,18 @@ def one_class(df, feats, key, year):
     fitted = fit_blend(train, target, feats, params)
     test['score'] = predict_blend(fitted, test)
     test['model_gbm'], test['model_ridge'] = predict_parts(fitted, test)
-    m = vorp_map(oof_scores(train, target, feats, params), y.values)
+    years = train['draft_year'].values
+    m = vorp_map(oof_scores(train, target, feats, params), y.values, years, FLOORS[key])
     test['model'], test['low'], test['high'] = to_vorp(test['score'].values, m)
 
     pick_feats = feats + ['log_pick']
     pick = slot_params(train, target, pick_feats, params)
     test['model_pick'] = predict_blend(fit_blend(train, target, pick_feats, pick), test)
+    # the same kind of range for the model with the slot, and for the pick number on its own
+    mp = conformal(oof_scores(train, target, pick_feats, pick), y.values, years, FLOORS[key])
+    test['pick_low'], test['pick_high'] = ranges(test['model_pick'].values, mp)
+    md = conformal(-train['log_pick'].values, y.values, years, FLOORS[key])
+    test['draft_low'], test['draft_high'] = ranges(-test['log_pick'].values, md)
 
     v3 = lgb.LGBMRegressor(**V3_PARAMS).fit(train[V3_FEATURES], class_rank(y, train['draft_year']))
     test['v3'] = v3.predict(test[V3_FEATURES])
@@ -320,15 +350,15 @@ def one_class(df, feats, key, year):
         r['model'] = 'model' if r['model'] == 'score' else r['model']
         r.update({'target': key, 'year': year, 'n': len(test)})
         metrics.append(r)
-    inside = (test[target] >= test['low']) & (test[target] <= test['high'])
-    metrics[0]['coverage'] = inside.mean()
-    metrics[0]['width'] = (test['high'] - test['low']).mean()
+    for i, lo, hi in [(0, 'low', 'high'), (3, 'pick_low', 'pick_high'), (6, 'draft_low', 'draft_high')]:
+        metrics[i]['coverage'] = ((test[target] >= test[lo]) & (test[target] <= test[hi])).mean()
+        metrics[i]['width'] = (test[hi] - test[lo]).mean()
 
     drivers = shap_rows(blend_shap(fitted, test), test[feats], test, key)
     test['target'] = key
     test['actual'] = test[target]
     preds = test[['person_id', 'name', 'draft_year', 'pick', 'target', 'actual', 'score', 'model', 'low', 'high',
-                  'model_gbm', 'model_ridge', 'model_pick', 'v3', 'v1_average']]
+                  'model_gbm', 'model_ridge', 'model_pick', 'pick_low', 'pick_high', 'draft_low', 'draft_high', 'v3', 'v1_average']]
     tuned = dict(params['gbm'], alpha=params['alpha'], w=params['w'], w_pick=pick['w'],
                  gbm_inner=params['gbm_inner'], ridge_inner=params['ridge_inner'],
                  blend_inner=params['blend_inner'], target=key, year=year)
@@ -343,7 +373,8 @@ def final_model(df, feats, key):
     done = df[df[target].notna()]
     params = tune(done, target, feats, seed=1)
     fitted = fit_blend(done, target, feats, params)
-    fitted['map'] = vorp_map(oof_scores(done, target, feats, params), done[target].values)
+    fitted['map'] = vorp_map(oof_scores(done, target, feats, params), done[target].values,
+                             done['draft_year'].values, FLOORS[key])
     fitted['last_class'] = int(done['draft_year'].max())
     fitted['params'] = params
     joblib.dump(fitted, os.path.join(MODELS, f'{key}.pkl'))
