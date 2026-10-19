@@ -25,3 +25,9 @@ env/
 .idea/
 .DS_Store
 Thumbs.db
+
+# raw downloads and api responses, build_dataset.py fetches them again
+data/raw/
+
+# trained models, train.py rebuilds them
+models/

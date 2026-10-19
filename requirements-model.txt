@@ -1,0 +1,11 @@
+# V3 engine: build_dataset.py, train.py, predict.py (tested on python 3.12)
+# the streamlit app only needs requirements.txt
+pandas==2.3.3
+numpy==2.5.4
+requests==2.34.2
+pyarrow==26.0.0
+nba_api==1.11.4
+scipy==1.18.1
+scikit-learn==1.9.1
+lightgbm==4.7.0
+shap==0.54.1
