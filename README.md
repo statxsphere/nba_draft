@@ -47,7 +47,7 @@ Each cell is Spearman · top 10 hits · NDCG@10.
 
 For comparison, V3 as published claimed 0.374 against 0.447 on Peak and 0.289 against 0.059 on Immediate. Run on the fixed targets with its old settings, V3 gets 0.449 on Peak and 0.373 on Immediate, so V4 is a real step up from V3, but the old Immediate "win" over the teams was mostly the bust-counting bug.
 
-So on stats alone the teams still win on the long-run questions and it's about even on the first two years. The pre-draft numbers do add something the teams miss, though: with the slot added, the model beats the slot on its own on average for every target.
+So on stats alone the teams still win on the long-run questions and it's about even on the first two years. The pre-draft numbers do add something the teams miss on some targets: with the slot added, the model clearly beats the slot on its own on Immediate and both plus-minus targets, and is level with it on Peak and Peak BPM. The slot version reuses the stats-only settings and only picks its blend weight again.
 
 The model's top ten in the 2026 class by projected Peak Impact Rating, stats only:
 
