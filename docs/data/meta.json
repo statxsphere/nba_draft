@@ -1,0 +1,104 @@
+{
+ "updated": "2026-10-19",
+ "classes": [
+  {
+   "year": 2010,
+   "players": 60,
+   "outcomes": "complete"
+  },
+  {
+   "year": 2011,
+   "players": 60,
+   "outcomes": "complete"
+  },
+  {
+   "year": 2012,
+   "players": 60,
+   "outcomes": "complete"
+  },
+  {
+   "year": 2013,
+   "players": 60,
+   "outcomes": "complete"
+  },
+  {
+   "year": 2014,
+   "players": 60,
+   "outcomes": "complete"
+  },
+  {
+   "year": 2015,
+   "players": 60,
+   "outcomes": "complete"
+  },
+  {
+   "year": 2016,
+   "players": 60,
+   "outcomes": "complete"
+  },
+  {
+   "year": 2017,
+   "players": 60,
+   "outcomes": "complete"
+  },
+  {
+   "year": 2018,
+   "players": 60,
+   "outcomes": "complete"
+  },
+  {
+   "year": 2019,
+   "players": 60,
+   "outcomes": "complete"
+  },
+  {
+   "year": 2020,
+   "players": 60,
+   "outcomes": "complete"
+  },
+  {
+   "year": 2021,
+   "players": 60,
+   "outcomes": "partial"
+  },
+  {
+   "year": 2022,
+   "players": 58,
+   "outcomes": "partial"
+  },
+  {
+   "year": 2023,
+   "players": 58,
+   "outcomes": "partial"
+  },
+  {
+   "year": 2024,
+   "players": 58,
+   "outcomes": "partial"
+  },
+  {
+   "year": 2025,
+   "players": 59,
+   "outcomes": "partial"
+  },
+  {
+   "year": 2026,
+   "players": 60,
+   "outcomes": "none"
+  }
+ ],
+ "scales": {
+  "peak": 4.0,
+  "imm": 2.0
+ },
+ "last_complete": {
+  "peak": 2020,
+  "imm": 2024
+ },
+ "last_nba_season": "2025-26",
+ "players": 1602,
+ "train_players": {
+  "peak": 960,
+  "imm": 1194
+ }
+}
