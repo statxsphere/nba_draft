@@ -64,7 +64,7 @@ function spearmanChart(c) {
   marks.push(Plot.tip(rows, Plot.pointer({ x: 'year', y: 'value', title: function (d) { return d.model + '\n' + d.year + ': ' + d.value.toFixed(3); } })));
   put('chart-spearman', Plot.plot({
     width: widthOf('chart-spearman'), height: 300, marginLeft: 40, style: baseStyle(c),
-    x: { label: 'Draft class', tickFormat: 'd', ticks: Math.min(t.years.length, 12) },
+    x: { label: 'Draft class', tickFormat: function (d) { return "'" + String(d).slice(2); }, ticks: widthOf('chart-spearman') < 500 ? 6 : Math.min(t.years.length, 12) },
     y: { label: 'Spearman', grid: true, domain: [Math.min(0, d3.min(rows, function (r) { return r.value; })), 1] },
     marks: marks
   }));
