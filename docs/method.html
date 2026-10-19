@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Draft Model Method</title>
-<meta name="description" content="How V3 of my NBA draft model is built: the data, the two targets, the model, the backtest, the ranges and the comps.">
+<meta name="description" content="How V4 of my NBA draft model is built: the data, the targets, the bust fix, the model, the honest backtest, the ranges and the comps.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -17,7 +17,7 @@
   <div class="wrap">
     <a class="brand" href="./">
       <svg class="brand-ball" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="var(--orange)"/><path d="M1 12h22M12 1v22M4.2 4.2c4 4 4 11.6 0 15.6M19.8 4.2c-4 4-4 11.6 0 15.6" stroke="var(--background)" stroke-width="1.3" fill="none"/></svg>
-      <span class="brand-name"><span class="name-long">NBA Draft </span>Projections</span><span class="tag">V3</span>
+      <span class="brand-name"><span class="name-long">NBA Draft </span>Projections</span><span class="tag">V4</span>
     </a>
     <nav class="nav">
       <a href="./">Board</a>
@@ -32,59 +32,104 @@
 <main class="wrap">
   <div class="page-title">
     <p class="eyebrow">Method</p>
-    <h1>How V3 works</h1>
-    <p class="lede">The third go at the same question I started with in 2021: from what a prospect did before the draft, how good will he be in the NBA?</p>
+    <h1>How V4 works</h1>
+    <p class="lede">The fourth go at the same question I started with in 2021: from what a prospect did before the draft, how good will he be in the NBA? V4 is mostly about making the answer honest.</p>
   </div>
 
   <article class="prose">
     <h2>Where this came from</h2>
-    <p>V1 was a notebook before the 2021 draft. I scraped Tankathon and Basketball Reference, averaged a few regression models and ranked the class (<a href="https://shoobydo.substack.com/p/nba-draft-2021-an-analysis">write-up here</a>). V2 in 2024 turned that into a Streamlit dashboard with two ratings and ceiling and floor comps. Neither version ever checked itself against the one baseline that matters, which is the order teams actually drafted in. V3 is mostly about that.</p>
+    <p>V1 was a notebook before the 2021 draft. I scraped Tankathon and Basketball Reference, averaged a few regression models and ranked the class (<a href="https://shoobydo.substack.com/p/nba-draft-2021-an-analysis">write-up here</a>). V2 in 2024 turned that into a Streamlit dashboard with two ratings and ceiling and floor comps. V3 rebuilt the data from open sources and finally checked the model against the order teams actually drafted in.</p>
+    <p>V3 had two problems I didn't see at the time. Its settings were picked on the same backtest it reported, so its numbers were flattering. And the way it counted busts quietly broke the draft-order baseline on Immediate. V4 fixes both, adds two per-possession targets, and only keeps upgrades that held up on classes the model hadn't seen.</p>
 
     <h2>The data</h2>
-    <p>Every pick from 2000 to 2026, 1,602 players, comes from the NBA's own draft history through <code>nba_api</code>, along with combine measurements (height without shoes, wingspan, reach, vertical, agility and sprint times) and birthdates for players Basketball Reference doesn't have.</p>
-    <p>College numbers are built from ESPN box scores published by the SportsDataverse hoopR project. I add up every game of a player's last college season, along with his team's and opponents' totals in those games, which gives per-40 numbers, shooting splits and rate stats like usage, assist, rebound, steal and block rates. I also work out a rough schedule-adjusted team margin so a big season at a 25-win team and one at a 10-win team aren't treated the same. The box scores start in 2004-05, so the model only learns from drafts from 2005 on. Matching names between ESPN and the NBA worked for 99% of college picks from 2005.</p>
-    <p>NBA outcomes are Basketball Reference's season VORP, BPM and win shares, taken from a public CSV mirror of their tables, through the 2025-26 season.</p>
-    <p>Not everyone comes from college. 303 picks came from overseas, 36 from high school and 16 from the G League or Overtime Elite. I don't drop them. They carry a background flag and have no college numbers, and the model handles the missing values itself. So for them it leans on age, size and the path they took, which is honestly most of what it can know.</p>
+    <p>Every pick from 2000 to 2026, 1,602 players, comes from the NBA's draft history through <code>nba_api</code>, with combine measurements and birthdates for players Basketball Reference doesn't have.</p>
+    <p>College numbers are built from ESPN box scores published by the SportsDataverse hoopR project. V4 adds up a player's last three college seasons instead of just the last one, weighted 5/3/2 toward the most recent, which gives per-40 numbers, shooting splits and rate stats from a bigger sample. From 2013-14 on I also use ESPN's play-by-play for shot types: how many of his shots came at the rim, from mid range and from dunks, how well he finished at the rim and from mid range, and how many of his makes were assisted. The assister on a made shot matches the "Assisted by" text 99.9% of the time, so I trust it. Before 2013-14 the play-by-play mostly only has made shots, so those classes don't get shot types. Matching names between ESPN and the NBA worked for 99% of college picks from 2005.</p>
+    <p>NBA outcomes are Basketball Reference's season VORP and BPM from a public CSV mirror of their tables, through 2025-26. For plus-minus I pulled every five-man lineup's possessions and points for and against from stats.nba.com, one team and season at a time, 570 requests spaced out and cached, from 2007-08 (the first season it has) to 2025-26.</p>
+    <p>303 picks came from overseas, 36 from high school and 16 from the G League or Overtime Elite. They stay in, with a background flag and no college numbers, so the model judges them on age, size and path.</p>
 
-    <h2>The two targets</h2>
-    <p>Same two as V2, rebuilt from scratch:</p>
+    <h2>The targets</h2>
+    <p>The two headline ratings are the same as V2 and V3:</p>
     <ul>
-      <li><b>Peak Impact Rating</b>: the best three-season run of VORP within a player's first six seasons, averaged per season.</li>
-      <li><b>Immediate Impact Rating</b>: average VORP over his first two seasons.</li>
+      <li><b>Peak Impact Rating</b>: the best three-season run of VORP within a player's first six seasons, averaged per season. 4 VORP a season is a 10.</li>
+      <li><b>Immediate Impact Rating</b>: average VORP over his first two seasons. 2 VORP a season is a 10.</li>
     </ul>
-    <p>A season he didn't play counts as zero, which is what VORP gives a replacement-level player, so stashed picks and busts aren't quietly dropped. Both are scaled to −10 to 10: 4 VORP a season over the peak run, or 2 over the first two years, is a 10.</p>
-    <p class="note">Younger players are still mid-career, so the outcome is censored. Peak only counts for classes up to 2020 and Immediate up to 2024. Newer players never go into training. On the board they show their numbers so far, marked as such.</p>
+    <p><b>The bust fix.</b> V3 counted a season a player didn't play as 0, which is replacement level, but kept a negative VORP for a player who did play and was bad. So a second-rounder who never played ranked above half the rotation players picked 6 to 30. On Immediate, the median never-played pick finished at 0.58 inside his class (1 is first), ahead of the median player with 500+ minutes at 0.44. Now a season below replacement counts as replacement, the same as not playing, since a team can always get replacement level for free. That one change took the draft order's Immediate correlation from 0.06 to 0.42 and its Peak correlation from 0.45 to 0.57. V3's big Immediate win over the teams was mostly this bug. The new version also tracks later careers better: it correlates 0.64 with a player's BPM in seasons 3 to 6, against 0.54 for the old one.</p>
+    <p>VORP rewards minutes, and high picks get minutes, so part of the draft order's score is just opportunity. Two targets that only count how good a player was per possession:</p>
+    <ul>
+      <li><b>Peak BPM</b>: the best three-season run of BPM in seasons 2 to 6, with the minutes pooled and 750 minutes of replacement level (−2) added first, so a short hot stint can't look like a star. The rookie year is left out. A rookie season predicts seasons 3 to 6 much worse than year two does (0.52 against 0.72 for VORP), which is why ESPN's model drops it too. I kept it in Immediate, though, since that rating is about the first two years, and dropping it there made Immediate track later careers slightly worse, not better.</li>
+      <li><b>Peak RAPM</b>, my own plus-minus: a ridge regression of every lineup's offensive and defensive rating per 100 possessions on who was on the floor, over three-season windows, weighted by possessions. Everyone starts at replacement level and only moves away from it as his minutes earn it. The ridge strength (4,000 possessions) came from cross validation on lineups, so it never looked at the draft. Peak RAPM is the best window in seasons 2 to 6, and <b>Immediate RAPM</b> is the first two seasons. With lineup totals I can't see who the opponents were, so this is rougher than possession-level RAPM. As a check, over the same three-season windows from 2013-14 to 2021-22, it correlates 0.78 with FiveThirtyEight's RAPTOR (0.81 on offence, 0.61 on defence) across 633 players.</li>
+    </ul>
+    <p>Nothing on any target counts below replacement. The VORP ratings stay the headline on the board, since that's the question I care about. Peak BPM and Peak RAPM show up in each player's drawer. Immediate RAPM is only on the backtest page, because two seasons of plus-minus for young players is mostly the prior.</p>
+    <p class="note">Careers are still going for recent classes, so the peak targets only count classes up to 2020 and Immediate up to 2024. Newer players never go into training, and the board shows their numbers so far.</p>
 
     <h2>The model</h2>
-    <p>It's a LightGBM gradient-boosted model with small, heavily regularised trees, since there are only about a thousand players to learn from. The draft is a ranking problem, so the model learns where each player finished within his own class, from 0 to 1, rather than raw VORP. Ranking that way did better in the backtest than fitting VORP directly. I picked that target and the tree settings by comparing a handful of options on this same backtest, so the numbers below are probably a little flattering. To turn a score back into a rating, I bin out-of-fold scores into 20 slices and use the average real VORP of past players in each slice.</p>
-    <p>The draft slot is not a feature. The point is to see what the pre-draft numbers say on their own, then compare that with what teams did. I also train a second version that does get the slot, as a check on whether the numbers add anything to the teams' own order.</p>
-    <p>For comparison I rebuilt my 2021 approach on the same data: median imputation, the 12 features a random forest likes most, and an average of gradient boosting, a small LightGBM and an SVR.</p>
+    <p>Two models, blended. One is LightGBM with small trees. The other is a ridge regression on the same inputs, with missing values filled by the median plus a flag for each. Both learn where each player finished within his own class, from 0 to 1, since the draft is a ranking problem. Recent public draft models keep finding that a regularised linear model does as well as boosting at this sample size, and CraftedNBA blends the two, so I did the same. The ridge mattered most on Immediate. The tuning can also force "younger is better" on age in LightGBM, and it chose that in most classes.</p>
+    <p>To turn a score back into VORP, BPM or plus-minus, I bin out-of-fold scores into 20 slices and use what past players in each slice actually did.</p>
+    <p>There are two versions. <b>Stats only</b> never sees the draft slot. It's the headline, because it's the one that can tell you something the teams don't already know. <b>Stats + draft slot</b> adds the log of the pick number, with the constraint that a later pick can only lower the projection. That's the version to use if you want the best guess, since every strong public model with a headline number mixes in consensus somehow.</p>
 
-    <h2>The backtest</h2>
-    <p>For every class from 2010 on, the model trains only on the drafts before it, then ranks the new class. I score each class two ways: the Spearman rank correlation with what actually happened, and how many of the real top 10 it had in its own top 10. The draft-order baseline is just the pick number.</p>
-    <p>Over 11 graded classes the stats-only model gets a rank correlation of 0.37 on Peak against 0.45 for the draft order, so the teams still win on the long-run question. That makes sense, since they see far more than a box score. With the slot added it gets to 0.44, about level. Within the first round the two are nearly even, at 0.23 against 0.25. On Immediate the model wins 13 classes out of 15, at 0.29 against 0.06. VORP doesn't reward young high picks who play big minutes before they're ready, and the draft order barely predicts it at all. On both targets the new model beats my 2021 approach, which got 0.33 and 0.19. The full numbers are on the <a href="backtest.html">backtest page</a>.</p>
+    <h2>The backtest, done properly this time</h2>
+    <p>For every class from 2010 on, the model only gets the drafts before it. Inside those, the settings are tuned the same way: each of the last six earlier classes is predicted from the classes before it, Optuna tries 40 settings for LightGBM, the ridge strength and the blend weight are picked on the same earlier classes, and only then is the test class ranked. None of the test classes ever touch the tuning. I report Spearman within each class, how many of the real top 10 it had in its top 10, NDCG@10 (with each player's gain being how far he got above replacement), and how often the 80% range held.</p>
+    <p>Averaged over the test classes, stats only against the draft order:</p>
+    <ul>
+      <li>Peak: 0.475 against 0.568, winning 2 of 11 classes. With the slot: 0.574, winning 5.</li>
+      <li>Immediate: 0.414 against 0.416, winning 9 of 15. With the slot: 0.479, winning 13.</li>
+      <li>Peak BPM: 0.447 against 0.509. With the slot: 0.526.</li>
+      <li>Peak RAPM: 0.420 against 0.470, though it hits more of the real top 10 (3.8 against 3.5). With the slot: 0.505, winning 8 of 11.</li>
+      <li>Immediate RAPM: 0.322 against 0.261, winning 12 of 15.</li>
+    </ul>
+    <p>So the teams still win on the long-run questions on stats alone, and it's roughly even on the first two years. The pre-draft numbers do add something the teams miss: on average the model with the slot beats the slot on its own on every target, though on Peak that's only in 5 classes of 11. All of this is on the <a href="backtest.html">backtest page</a>, next to V3's published numbers.</p>
+    <p>One step does look at the test classes: deciding which groups of features to keep. Settings are tuned blind, but I compared each feature idea on these same classes with fixed settings. I decided the rule before running it: an idea stays only if it helps on average and in most classes. With 11 to 15 classes per target, anything under about 0.03 in Spearman is noise anyway.</p>
+
+    <h2>What I tried that didn't earn a place</h2>
+    <ul>
+      <li>Adjusting stats for opponent strength, using ridge team ratings from every game's margin and how much each stat drops against a better opponent within a player's own season. Steals and blocks barely move; points drop about 0.19 per 40 for each point of opponent rating. No gain on the backtest.</li>
+      <li>Age-adjusting each stat by how much college players improve from one season to the next. Points and assists grow a lot, blocks don't at all, which matches what Jeremias Engelmann found. No gain either, probably because the trees already see age.</li>
+      <li>Shrinking small samples toward the position average (empirical Bayes), stats relative to the position and season average, and flags for skipping the combine. All within noise.</li>
+      <li>Weighting older seasons more heavily, Pelton style. Slightly worse than weighting the newest season most.</li>
+      <li>A ridge per position group. Clearly worse; there just aren't enough players per group.</li>
+      <li>A LightGBM lambdarank head with each class as one query. On its own it was the worst model I tried, and adding it to the blend was a coin flip (better in 30 of 63 classes).</li>
+      <li>A two-part model for the per-possession targets: the chance he reaches 1,500 minutes in seasons 2 to 6, times how good he is if he does. Worse than the single model on both BPM and RAPM.</li>
+      <li>G League box scores through <code>nba_api</code>. Only 16 picks came that way, too few to learn anything from, so I left it out.</li>
+    </ul>
+    <p>The code for all of it is still in the repo, switched off, so the comparison can be rerun with <code>python ablation.py</code>.</p>
 
     <h2>Ranges</h2>
-    <p>Each projection comes with a 10th to 90th percentile range: what the worst and best tenth of past players with a similar score actually did, taken from the same out-of-fold slices. In the backtest, 83% of Peak outcomes and 74% of Immediate outcomes landed inside their range, close to the 80% it should be. The ranges are wide because the draft really is that uncertain.</p>
+    <p>Each projection comes with an 80% range, calibrated on earlier classes only. I take the 10th to 90th percentile curves of what past players did at each score from half the earlier classes, then use the other half, which includes the most recent class, to widen or narrow them until 80% land inside. It's conformalised quantile regression with one twist. So many careers sit exactly at replacement level that a plain 10th to 90th range covered close to 90%, so the calibration step picks the percentile width instead of adding a margin. On the test classes, 81% of Peak, 84% of Immediate, 79% of Peak BPM and 83% of Peak RAPM outcomes landed inside. The ranges for the top prospects are wide, often from replacement level to a 10. That's what 80% honestly looks like for a top-ten pick.</p>
 
     <h2>Why a projection is what it is</h2>
-    <p>Each player's drivers are SHAP values from the model that made his projection. They show how much each feature moved him up or down within his class, in percentile points. Age at the draft is the biggest single driver, followed by steal rate, size and shooting efficiency.</p>
+    <p>Each player's drivers are SHAP values for the whole blend: tree SHAP for LightGBM, the exact linear version for the ridge (each coefficient times how far the player is from average), mixed with the blend weight. A missing-value flag counts toward the feature it flags. They show how far each feature moved him within his class, in percentile points. Age is still the biggest driver, then true shooting, team strength and steals.</p>
 
     <h2>Comps</h2>
-    <p>Comps work the same way they did in V2. Pre-draft features are standardised and compared by cosine similarity, using only the features both players have, against players from earlier classes whose careers are long enough to grade. College players are compared with college players, and everyone else with other non-college picks. Out of the ten closest, the one who did best is the ceiling and the one who did worst is the floor, and each comp shows what his career actually turned into.</p>
+    <p>Comps work the same way as in V2 and V3. Pre-draft features are standardised and compared by cosine similarity, using only the features both players have, against earlier classes whose careers are long enough to grade. Out of the ten closest, the best career is the ceiling and the worst is the floor.</p>
 
     <h2>What it can't see</h2>
     <ul>
       <li>Injuries, medicals, interviews, fit, and anything else a front office knows.</li>
-      <li>International and G League stats. Overseas players are judged on age, measurements and background only.</li>
+      <li>International stats. Overseas players are judged on age, measurements and background only.</li>
+      <li>College plus-minus. ESPN's play-by-play only has substitutions from 2024-25 on, so there's no history to train on yet. Shot locations are similar: under 30% of shots have coordinates before 2025-26.</li>
+      <li>Recruiting ranks and Barttorvik-style numbers. CollegeBasketballData has them, and its terms allow model training, but it needs an API key. <code>build_dataset.py</code> leaves a spot for it.</li>
       <li>Anything before the 2004-05 college season, which is why older classes are only used for comps.</li>
-      <li>Players who skip the combine have no wingspan, reach or athletic testing, and listed heights stand in for measured ones.</li>
+    </ul>
+
+    <h2>Sources I leaned on</h2>
+    <ul>
+      <li>Zhou &amp; Guan (2026) on how targets built on career production reward the draft process itself: <a href="https://arxiv.org/abs/2609.27245">arXiv 2609.27245</a>. This is what sent me looking at the bust coding.</li>
+      <li>databallr's PASCAL model, for the ranking loss and the survival-into-the-league idea I tested: <a href="https://databallr.com/nbadraft/model-explanation">model explanation</a>.</li>
+      <li>JSuttHoops on using plus-minus as the outcome: <a href="https://jsutthoops.substack.com/p/this-draft-model-beats-front-offices">This draft model beats front offices</a> (2026).</li>
+      <li>Max Moacanin's 2026 forecast, where ridge beat LightGBM and the combine was dropped because top prospects skip it: <a href="https://maxmoacanin.substack.com/p/2026-nba-draft-forecast">2026 NBA draft forecast</a>.</li>
+      <li>CraftedNBA, for blending ElasticNet with LightGBM and comparing against draft order year by year: <a href="https://craftednba.com/draft">craftednba.com/draft</a>.</li>
+      <li>CollegeBasketballData's data availability page, for what college play-by-play exists and when: <a href="https://api.collegebasketballdata.com/data-availability">data availability</a>, and hoopR's play-by-play docs for the shot fields: <a href="https://rdrr.io/cran/hoopR/man/load_mbb_pbp.html">load_mbb_pbp</a>.</li>
+      <li>FiveThirtyEight's RAPTOR data (CC BY 4.0), used only to check my plus-minus: <a href="https://github.com/fivethirtyeight/data/tree/master/nba-raptor">nba-raptor</a>.</li>
+      <li>Kevin Pelton's projection system, for weighting college seasons and shrinking small samples: <a href="https://africa.espn.com/nba/story/_/id/16235135/explaining-kevin-pelton-nba-draft-projection-system">explaining the system</a>. ESPN's 2018 model for leaving out the rookie year: <a href="https://africa.espn.com/nba/story/_/id/23771351/espn-draft-analytics-model-makes-nba-draft-projections">ESPN draft analytics</a>.</li>
+      <li>Jeremias Engelmann on age and schedule adjustments for college stats: <a href="https://www.roycewebb.com/p/how-to-adjust-college-stats-featuring">how to adjust college stats</a>.</li>
+      <li>Cawley &amp; Talbot (2010) on why tuning on the test folds biases the result: <a href="https://www.jmlr.org/papers/v11/cawley10a.html">JMLR</a>. Optuna for the tuning: <a href="https://arxiv.org/abs/1907.10902">arXiv 1907.10902</a>.</li>
+      <li>Romano, Patterson &amp; Candès (2019), conformalized quantile regression: <a href="https://arxiv.org/abs/1905.03222">arXiv 1905.03222</a>. LightGBM's monotone constraints: <a href="https://lightgbm.readthedocs.io/en/latest/Parameters.html">parameters</a>.</li>
     </ul>
 
     <h2>Rebuilding it</h2>
 <pre>pip install -r requirements-model.txt
-python build_dataset.py && python train.py && python predict.py</pre>
-    <p>Raw downloads and API responses are cached, so a rerun doesn't hit anyone's servers again. The code is on <a href="https://github.com/statxsphere/nba_draft">GitHub</a>.</p>
+python build_dataset.py && python rapm.py && python train.py && python predict.py</pre>
+    <p>Raw downloads and API responses are cached, so a rerun doesn't hit anyone's servers again. The nested backtest takes about six minutes on a 32-thread machine. The code is on <a href="https://github.com/statxsphere/nba_draft">GitHub</a>.</p>
   </article>
 </main>
 
