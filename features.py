@@ -17,8 +17,8 @@ COMBINE = ['wingspan', 'reach', 'vertical', 'agility', 'sprint']
 # weights on the last three college seasons, newest first
 SEASON_WEIGHTS = {'last': [1, 0, 0], 'new': [5, 3, 2], 'old': [2, 3, 5]}
 
-# what v4 uses, picked with ablation.py
-OPTIONS = dict(seasons='last', schedule=True, shrink=True, age=True, position=True, flags=True)
+# what v4 uses, picked with ablation.py. only the season weighting helped, the rest stays switched off
+OPTIONS = dict(seasons='new', schedule=False, shrink=False, age=False, position=False, flags=False)
 
 AGE_REF = 20.0
 MIN_MINUTES = 100
@@ -56,6 +56,64 @@ def pooled(seasons, df, scheme):
     return tot
 
 
+# ---------- feature steps ----------
+# each step gets the rates table and can change it in place, and returns any new model features.
+# a new idea is a new function added to STEPS, then switched on in OPTIONS
+
+def schedule_step(c):
+    # credit a player for a tougher schedule, by how much each stat drops against better teams
+    f = c['f']
+    for stat, b in c['adj']['schedule_slope'].items():
+        before = f[stat].copy()
+        f[stat] = f[stat] - b * f['sos']
+        ratio = (f[stat] / before).where(before > 0)
+        for rate_stat, base in [('usg', 'fga40'), ('ast_pct', 'ast40'), ('orb_pct', 'orb40'),
+                                ('drb_pct', 'drb40'), ('stl_pct', 'stl40'), ('blk_pct', 'blk40')]:
+            if base == stat:
+                f[rate_stat] = f[rate_stat] * ratio.fillna(1)
+    f['trb40'] = f['orb40'] + f['drb40']
+    return ['m_sos', 'm_team_rating']
+
+
+def shrink_step(c):
+    # small samples get pulled toward the average d1 player at his position that season
+    f, prior = c['f'], c['prior']
+    has = f['minutes'].notna()
+    for stat in RATE_STATS:
+        w = c['n'][stat].reindex(c['df']['person_id'].values).values
+        w = w / (w + c['adj']['shrink_k'][stat])
+        f[stat] = np.where(has, w * f[stat].fillna(prior[stat]) + (1 - w) * prior[stat], np.nan)
+    return []
+
+
+def age_step(c):
+    # a year older is about a year more developed, so put everyone on a 20 year old's scale
+    f = c['f']
+    years = (c['df']['age'] - f['eff_age_back'] - AGE_REF).fillna(0)
+    for stat in RATE_STATS:
+        f[stat] = f[stat] - c['adj']['season_change'][stat] * years
+    return []
+
+
+def position_step(c):
+    # relative to the average d1 player at his position that season, which also takes out the era
+    for stat in RATE_STATS:
+        c['f'][stat] = c['f'][stat] - c['prior'][stat]
+    return []
+
+
+def flags_step(c):
+    # skipping the combine says something on its own
+    df = c['df']
+    df['no_combine'] = df[COMBINE].isna().all(axis=1).astype(int)
+    df['no_athletic'] = (df['vertical'].isna() & df['wingspan'].notna()).astype(int)
+    return ['no_combine', 'no_athletic', 'm_college_seasons']
+
+
+STEPS = [('schedule', schedule_step), ('shrink', shrink_step), ('age', age_step),
+         ('position', position_step), ('flags', flags_step)]
+
+
 def make_features(df, options=None):
     o = dict(OPTIONS, **(options or {}))
     seasons, priors, adj = load_college()
@@ -63,67 +121,31 @@ def make_features(df, options=None):
     tot = pooled(seasons, df[df['espn_id'].notna()], o['seasons'])
     f = rates(tot)
     n = {c: tot['n_' + EXPOSURE.get(c, 'min').replace('tsa', 'fga')] for c in RATE_STATS}
-    f['sos'] = tot['sos']
-    f['team_rating'] = tot['team_rating']
-    f['college_seasons'] = tot['college_seasons']
+    for c in ['sos', 'team_rating', 'college_seasons']:
+        f[c] = tot[c]
     f['eff_age_back'] = tot['back']
     f['minutes'] = tot['min']
     f = f.reindex(df['person_id'].values)
     f.index = df.index
 
-    if o['schedule']:
-        # credit a player for a tougher schedule, by how much each stat drops against better teams
-        slope = adj['schedule_slope']
-        for c, b in slope.items():
-            before = f[c].copy()
-            f[c] = f[c] - b * f['sos']
-            ratio = (f[c] / before).where(before > 0)
-            for rate_stat, base in [('usg', 'fga40'), ('ast_pct', 'ast40'), ('orb_pct', 'orb40'),
-                                    ('drb_pct', 'drb40'), ('stl_pct', 'stl40'), ('blk_pct', 'blk40')]:
-                if base == c:
-                    f[rate_stat] = f[rate_stat] * ratio.fillna(1)
-        f['trb40'] = f['orb40'] + f['drb40']
-
-    pos = df['espn_pos'].apply(pos_group)
-    key = pd.DataFrame({'college_season': df['college_season'], 'pos': pos}, index=df.index)
+    key = pd.DataFrame({'college_season': df['college_season'], 'pos': df['espn_pos'].apply(pos_group)}, index=df.index)
     prior = key.merge(priors, on=['college_season', 'pos'], how='left')
     prior.index = df.index
 
-    if o['shrink']:
-        # small samples get pulled toward the average d1 player at his position that season
-        for c in RATE_STATS:
-            k = adj['shrink_k'][c]
-            w = n[c].reindex(df['person_id'].values).values
-            w = w / (w + k)
-            has = f['minutes'].notna()
-            f[c] = np.where(has, w * f[c].fillna(prior[c]) + (1 - w) * prior[c], np.nan)
+    context = {'df': df, 'f': f, 'prior': prior, 'n': n, 'adj': adj}
+    extra = []
+    for name, step in STEPS:
+        if o.get(name):
+            extra += step(context)
 
-    if o['age']:
-        # a year older is about a year more developed, so put everyone on a 20 year old's scale
-        years = (df['age'] - f['eff_age_back'] - AGE_REF).fillna(0)
-        for c in RATE_STATS:
-            f[c] = f[c] - adj['season_change'][c] * years
-
-    if o['position']:
-        # relative to the average d1 player at his position that season, which also takes out the era
-        for c in RATE_STATS:
-            f[c] = f[c] - prior[c]
-
-    feats = list(BASE)
     for c in COLLEGE + ['sos', 'team_rating', 'college_seasons']:
         df['m_' + c] = f[c]
-    feats += ['m_' + c for c in COLLEGE]
-    if o['schedule']:
-        feats += ['m_sos', 'm_team_rating']
-    else:
+    feats = BASE + ['m_' + c for c in COLLEGE] + extra
+    if 'm_sos' not in extra:
         feats += ['team_margin', 'team_srs']
-    if o['flags']:
-        df['no_combine'] = df[COMBINE].isna().all(axis=1).astype(int)
-        df['no_athletic'] = (df['vertical'].isna() & df['wingspan'].notna()).astype(int)
-        feats += ['no_combine', 'no_athletic', 'm_college_seasons']
 
     # very low minute college seasons are mostly noise, so treat them like no stats at all
     low = f['minutes'].fillna(0) < MIN_MINUTES
-    model_college = [c for c in feats if c.startswith('m_')] + (['team_margin', 'team_srs'] if not o['schedule'] else [])
-    df.loc[low, model_college] = np.nan
+    college_cols = [c for c in feats if c.startswith('m_') or c in ['team_margin', 'team_srs']]
+    df.loc[low, college_cols] = np.nan
     return df, feats
