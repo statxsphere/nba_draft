@@ -333,3 +333,12 @@ table.plain-table td.win { color: var(--good); font-weight: 600; }
 @media (prefers-reduced-motion: reduce) {
   .drawer, .scrim { transition: none; }
 }
+
+/* backtest page */
+.seg.seg-wrap { flex-wrap: wrap; }
+.changes { margin: 8px 0 0; padding-left: 18px; }
+.changes li { margin: 4px 0; }
+.ratings.small-cards { margin-top: 12px; }
+.ratings.small-cards .big { font-size: 24px; }
+.per-note { margin: 8px 0 0; }
+#before-table td:first-child, #tried-table td:first-child, #audit-table td:first-child { font-family: "Geist", system-ui, sans-serif; min-width: 190px; }

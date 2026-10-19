@@ -114,7 +114,7 @@ function renderTable() {
 }
 
 function classMetric(key, model, field) {
-  var bt = state.backtest[key];
+  var bt = state.backtest.targets[key];
   var i = bt.years.indexOf(state.year);
   if (i === -1) return null;
   return bt.models[model][field][i];
@@ -206,8 +206,23 @@ function ratingCard(p, key) {
     ' <span class="muted">(' + fmt(key === 'peak' ? (complete ? a.peak : a.peak_so_far) : (complete ? a.imm : a.imm_so_far), 2) + ' VORP a season)</span>';
   return '<div class="card rating-card"><div class="stat-label">' + title + ' Rating</div>' +
     '<div class="big" style="color:' + (key === 'peak' ? 'var(--orange)' : 'var(--teal)') + '">' + fmt(r.rating, 1) + '</div>' +
-    '<div class="range">range ' + fmt(r.rating_low, 1) + ' to ' + fmt(r.rating_high, 1) + ' · ' + fmt(r.vorp, 2) + ' VORP/season</div>' +
+    '<div class="range">80% range ' + fmt(r.rating_low, 1) + ' to ' + fmt(r.rating_high, 1) + ' · ' + fmt(r.vorp, 2) + ' VORP/season</div>' +
     rangeBar(p, key, act) +
+    '<div class="actual">' + actLine + '</div></div>';
+}
+
+function perPossCard(p, key, title) {
+  // the per possession projections, in points per 100 against an average player
+  var r = p.pred[key];
+  if (!r) return '';
+  var a = p.actual;
+  var act = key === 'bpm' ? (a.bpm !== null && a.bpm !== undefined ? a.bpm : a.bpm_so_far) : a.rapm;
+  var done = key === 'bpm' ? a.bpm !== null && a.bpm !== undefined : act !== null && act !== undefined;
+  var actLine = act === null || act === undefined ? '<span class="muted">Not graded yet.</span>' :
+    (done ? 'Actual: ' : 'So far: ') + '<b>' + signed(act, 1) + '</b>';
+  return '<div class="card rating-card"><div class="stat-label">' + title + '</div>' +
+    '<div class="big">' + signed(r.rating, 1) + '</div>' +
+    '<div class="range">80% range ' + signed(r.rating_low, 1) + ' to ' + signed(r.rating_high, 1) + '</div>' +
     '<div class="actual">' + actLine + '</div></div>';
 }
 
@@ -282,6 +297,8 @@ function openPlayer(id, push) {
     '<button class="icon-btn close" id="drawer-close" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>' +
     '<div class="drawer-body">' +
     '<div class="ratings">' + ratingCard(p, 'peak') + ratingCard(p, 'imm') + '</div>' +
+    '<div class="ratings small-cards">' + perPossCard(p, 'bpm', 'Peak BPM, per 100') + perPossCard(p, 'rapm', 'Peak plus-minus, per 100') + '</div>' +
+    '<p class="muted small per-note">Per possession, so minutes do not count. 0 is an average player and −2 is replacement level, which is also the floor.</p>' +
     '<section><div class="section-title"><h3>What drives the ' + (key === 'peak' ? 'peak' : 'immediate') + ' projection</h3><span>SHAP, in class percentile points</span></div>' + driverList(p, key) + '</section>' +
     '<section><div class="section-title"><h3>And the ' + (other === 'peak' ? 'peak' : 'immediate') + ' one</h3></div>' + driverList(p, other) + '</section>' +
     '<section><div class="section-title"><h3>Pre-draft season</h3></div>' + collegeTable(p) + '</section>' +

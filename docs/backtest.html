@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Draft Model Backtest</title>
-<meta name="description" content="How the draft model does against actual draft order, class by class, when it only gets to learn from earlier drafts.">
+<meta name="description" content="How the draft model does against actual draft order, class by class, when it only gets to learn and tune on earlier drafts.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -19,7 +19,7 @@
   <div class="wrap">
     <a class="brand" href="./">
       <svg class="brand-ball" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="var(--orange)"/><path d="M1 12h22M12 1v22M4.2 4.2c4 4 4 11.6 0 15.6M19.8 4.2c-4 4-4 11.6 0 15.6" stroke="var(--background)" stroke-width="1.3" fill="none"/></svg>
-      <span class="brand-name"><span class="name-long">NBA Draft </span>Projections</span><span class="tag">V3</span>
+      <span class="brand-name"><span class="name-long">NBA Draft </span>Projections</span><span class="tag">V4</span>
     </a>
     <nav class="nav">
       <a href="./">Board</a>
@@ -35,18 +35,31 @@
   <div class="page-title">
     <p class="eyebrow">Backtest</p>
     <h1>Does it beat the teams?</h1>
-    <p class="lede">For every class, the model only learns from the drafts before it, then ranks the new class. I compare that ranking with the order teams actually picked in, against what the players went on to do.</p>
+    <p class="lede">For every class, the model only learns from the drafts before it, and its settings are tuned on those earlier drafts too. Then it ranks the new class, and I compare that with the order teams actually picked in.</p>
   </div>
 
+  <section class="block card card-pad">
+    <h2>What changed in V4</h2>
+    <ul class="small changes">
+      <li><b>Honest numbers.</b> V3's settings were picked on the same backtest it reported. Now every setting is tuned only on classes before the one being tested, so the numbers below are lower than V3's but they're real.</li>
+      <li><b>Fixed how busts are counted.</b> V3 gave a pick who never played a 0 but a rotation player with a bad season a negative number, so never playing beat playing badly. Now a season below replacement counts as replacement. That alone took the draft order's Immediate correlation from 0.06 to 0.42, so V3's big Immediate win was mostly that bug.</li>
+      <li><b>Two per-possession targets</b> that don't reward a pick for just getting minutes: Peak BPM, and my own plus-minus (RAPM) built from every NBA lineup since 2007-08.</li>
+      <li><b>A ridge regression blended with LightGBM</b>, and college stats from the last three seasons instead of one, plus shot types (rim, mid range, dunks, assisted) from 2013-14 on.</li>
+      <li><b>Ranges that are checked</b>: 80% ranges calibrated on earlier classes, and the share that held is shown below for every class.</li>
+    </ul>
+  </section>
+
   <div class="toolbar">
-    <div class="seg" id="target">
-      <button data-v="peak" class="on">Peak Impact</button>
-      <button data-v="imm">Immediate Impact</button>
-    </div>
+    <div class="seg seg-wrap" id="target"></div>
     <span class="muted small" id="target-note"></span>
   </div>
 
   <div class="stats" id="headline"></div>
+
+  <section class="block card">
+    <div class="card-head"><h2>Before and after</h2><p class="muted small">Average over the test classes. Spearman and NDCG@10 are inside each class; top 10 hits are out of the real top 10; coverage is how often the real outcome landed inside the 80% range.</p></div>
+    <div class="table-scroll" style="margin-top:12px"><table class="plain-table" id="before-table"></table></div>
+  </section>
 
   <section class="block card chart-card">
     <h2>Rank correlation with real outcomes, by class</h2>
@@ -57,41 +70,52 @@
 
   <div class="grid-2 block">
     <section class="card chart-card">
+      <h2>Do the ranges hold?</h2>
+      <p class="muted small">Share of each class whose real outcome landed inside its 80% range, for the stats-only model, the model with the slot, and a range built from the pick number alone.</p>
+      <div class="chart" id="chart-coverage"></div>
+      <div class="chart-legend" id="legend-coverage"></div>
+    </section>
+    <section class="card chart-card">
       <h2>Top 10 hits</h2>
       <p class="muted small">Of the ten best players in each class, how many the model had in its top ten, against picks 1 to 10.</p>
       <div class="chart" id="chart-hits"></div>
       <div class="chart-legend" id="legend-hits"></div>
     </section>
-    <section class="card chart-card">
-      <h2>Calibration</h2>
-      <p class="muted small">Every backtest projection, split into ten equal groups. Dots on the dashed line mean the model's numbers are the right size, not just the right order.</p>
-      <div class="chart" id="chart-calib"></div>
-      <div class="chart-legend"><span><i style="background:var(--orange)"></i>projection vs actual, VORP a season</span><span><i style="background:var(--grey-line)"></i>average 10th to 90th range</span></div>
-    </section>
   </div>
 
   <div class="grid-2 block">
     <section class="card chart-card">
+      <h2>Calibration</h2>
+      <p class="muted small">Every backtest projection, split into ten equal groups. Dots on the dashed line mean the model's numbers are the right size, not just the right order.</p>
+      <div class="chart" id="chart-calib"></div>
+      <div class="chart-legend"><span><i style="background:var(--orange)"></i>projection vs actual</span><span><i style="background:var(--grey-line)"></i>average 80% range</span></div>
+    </section>
+    <section class="card chart-card">
       <h2>Every projection</h2>
-      <p class="muted small">Each dot is a player, projected VORP against real VORP. Hover for names.</p>
+      <p class="muted small">Each dot is a player, projected against real. Hover for names.</p>
       <div class="chart" id="chart-scatter"></div>
       <div class="chart-legend"><span><i style="background:var(--orange)"></i>first round</span><span><i style="background:var(--teal)"></i>second round</span></div>
     </section>
-    <section class="card chart-card">
-      <h2>Do the ranges hold?</h2>
-      <p class="muted small">Share of players whose real outcome landed inside their 10th to 90th percentile range. It should sit near 80%.</p>
-      <div class="chart" id="chart-coverage"></div>
-    </section>
   </div>
+
+  <section class="block card">
+    <div class="card-head"><h2>What I tried and kept or dropped</h2><p class="muted small">Each idea against the version without it, averaged over all three targets' test classes. With 11 to 15 classes per target, a change smaller than about 0.03 in Spearman is noise, so an idea had to help on average and in most classes to stay.</p></div>
+    <div class="table-scroll" style="margin-top:12px"><table class="plain-table" id="tried-table"></table></div>
+  </section>
+
+  <section class="block card">
+    <div class="card-head"><h2>The bust fix</h2><p class="muted small">Draft order's own score under the old and new way of counting seasons below replacement, and where players who never played landed inside their class (0 is last, 1 is first).</p></div>
+    <div class="table-scroll" style="margin-top:12px"><table class="plain-table" id="audit-table"></table></div>
+  </section>
 
   <section class="block card chart-card">
     <h2>What the model leans on</h2>
-    <p class="muted small">Average size of each feature's SHAP value in the final model. The model ranks players inside their class, so this is in percentile points: 3 means the feature moves a typical player about 3 places in a 100-player class.</p>
+    <p class="muted small">Average size of each feature's SHAP value in the final blend (LightGBM's tree SHAP plus the ridge's exact linear SHAP, mixed by the blend weight). In class percentile points: 3 means the feature moves a typical player about 3 places in a 100-player class.</p>
     <div class="chart" id="chart-importance"></div>
   </section>
 
   <section class="block card">
-    <div class="card-head"><h2>Class by class</h2><p class="muted small">Spearman correlation with the real outcome, then top 10 hits.</p></div>
+    <div class="card-head"><h2>Class by class</h2><p class="muted small">Spearman correlation with the real outcome, then top 10 hits and range coverage.</p></div>
     <div class="table-scroll" style="margin-top:12px"><table class="plain-table" id="year-table"></table></div>
   </section>
 </main>
