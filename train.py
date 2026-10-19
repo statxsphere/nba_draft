@@ -35,7 +35,8 @@ FEATURES = ['age', 'height', 'weight', 'wingspan', 'wing_diff', 'reach', 'vertic
             'fga40', 'fg3a40', 'fta40', 'ts', 'efg', 'fg3_pct', 'ft_pct', 'fg3a_rate', 'fta_rate', 'usg',
             'ast_pct', 'orb_pct', 'drb_pct', 'stl_pct', 'blk_pct', 'tov_pct', 'ast_tov', 'team_margin', 'team_srs']
 
-TARGETS = {'peak': 'peak_vorp', 'imm': 'imm_vorp'}
+TARGETS = {'peak': 'peak_vorp', 'imm': 'imm_vorp', 'bpm': 'peak_bpm'}
+FLOORS = {'peak': 0.0, 'imm': 0.0, 'bpm': -2.0}   # replacement level for each target
 
 # the v3 settings, kept as the "before" line
 V3_PARAMS = dict(n_estimators=400, learning_rate=0.02, num_leaves=7, min_child_samples=20,
@@ -192,14 +193,14 @@ def ndcg10(score, actual, floor=0.0):
     return ndcg_score([gain], [score], k=10)
 
 
-def class_metrics(test, target, model_cols):
+def class_metrics(test, key, model_cols):
     rows = []
-    actual = test[target].values
+    actual = test[TARGETS[key]].values
     for m in model_cols:
         score = test[m].values
         rows.append({'model': 'model' if m == 'score' else m, 'spearman': spearmanr(score, actual)[0],
                      'top5': top_hits(score, actual, 5), 'top10': top_hits(score, actual, 10),
-                     'ndcg10': ndcg10(score, actual)})
+                     'ndcg10': ndcg10(score, actual, FLOORS[key])})
     return rows
 
 
@@ -238,7 +239,7 @@ def one_class(df, key, year):
     test['draft_order'] = -test['pick']
 
     metrics = []
-    for r in class_metrics(test, target, ['score', 'model_pick', 'v3', 'v1_average', 'draft_order']):
+    for r in class_metrics(test, key, ['score', 'model_pick', 'v3', 'v1_average', 'draft_order']):
         r.update({'target': key, 'year': year, 'n': len(test), 'inner_spearman': inner})
         metrics.append(r)
     inside = (test[target] >= test['low']) & (test[target] <= test['high'])
@@ -271,10 +272,31 @@ def final_models(df, key):
     return imp.sort_values('mean_abs_shap', ascending=False), int(done['draft_year'].max())
 
 
+def target_audit(df):
+    # how the old and new coding treat players who barely played, and what it does to the draft order baseline
+    seasons = pd.read_csv(os.path.join(FINAL, 'nba_seasons.csv'))
+    mp2 = seasons[seasons['k'] <= 2].groupby('person_id')['mp'].sum()
+    rows = []
+    for col, label in [('imm_vorp_v3', 'Immediate, v3 coding'), ('imm_vorp', 'Immediate, floored'),
+                       ('peak_vorp_v3', 'Peak, v3 coding'), ('peak_vorp', 'Peak, floored'), ('peak_bpm', 'Peak BPM')]:
+        d = df[df[col].notna() & (df['draft_year'] >= FIRST_TEST)].copy()
+        d['mp2'] = d['person_id'].map(mp2).fillna(0)
+        d['r'] = d.groupby('draft_year')[col].rank(pct=True)
+        rho = np.mean([spearmanr(-g['pick'], g[col])[0] for _, g in d.groupby('draft_year')])
+        rows.append({'target': label, 'draft_order_spearman': rho, 'players': len(d),
+                     'never_played_rank': d[d['mp2'] == 0]['r'].median(),
+                     'played_500_rank': d[d['mp2'] >= 500]['r'].median(),
+                     'share_below_zero': (d[col] < 0).mean() if 'bpm' not in col else np.nan})
+    out = pd.DataFrame(rows)
+    print(out.round(3).to_string(index=False))
+    return out
+
+
 def main():
     os.makedirs(MODELS, exist_ok=True)
     df = load_data()
     print(f'{len(df)} players drafted since {FIRST_TRAIN}')
+    target_audit(df).round(4).to_csv(os.path.join(FINAL, 'target_audit.csv'), index=False)
 
     jobs = []
     for key in TARGETS:

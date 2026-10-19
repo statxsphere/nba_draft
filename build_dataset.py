@@ -20,6 +20,8 @@ LAST_NBA_SEASON = 2026        # 2025-26, the last season in the bbref snapshot
 PEAK_SEASONS = 6              # peak = best 3 season run inside the first 6 seasons
 PEAK_SCALE = 4.0              # 4 vorp a season over the run = 10
 IMM_SCALE = 2.0               # 2 vorp a season over the first two = 10
+REPLACEMENT_BPM = -2.0        # bpm of a replacement level player, what vorp is measured from
+BPM_PRIOR_MIN = 750           # minutes of replacement level added before taking a player's bpm
 
 HEADERS = {'User-Agent': 'nba_draft data script (github.com/statxsphere/nba_draft)'}
 
@@ -254,19 +256,42 @@ def best_run(v):
     return max(np.mean(v[i:i + 3]) for i in range(len(v) - 2))
 
 
+def best_bpm_run(bpm, mp):
+    # per possession: best 3 season run of bpm, with the minutes pooled and 750 minutes of
+    # replacement level (-2) added, so a short stint can't look like a star
+    if len(bpm) == 0:
+        return np.nan
+    runs = []
+    for i in range(max(len(bpm) - 2, 1)):
+        b, m = bpm[i:i + 3], mp[i:i + 3]
+        runs.append((np.sum(b * m) + BPM_PRIOR_MIN * REPLACEMENT_BPM) / (np.sum(m) + BPM_PRIOR_MIN))
+    return max(max(runs), REPLACEMENT_BPM)
+
+
 def add_targets(df, seasons):
-    peak, imm, peak_so_far, imm_so_far = [], [], [], []
+    # a season below replacement counts as replacement, the same as a season he didn't play.
+    # without this a pick who never plays (0) ranks above a rotation player with -0.5
+    seasons['vorp_floor'] = seasons['vorp'].clip(lower=0)
+    rows = []
     for _, p in df.iterrows():
-        v = seasons[seasons['person_id'] == p['person_id']].sort_values('k')['vorp'].values
-        v6 = v[:PEAK_SEASONS]
-        peak.append(best_run(v6) if len(v) >= PEAK_SEASONS else np.nan)
-        imm.append(np.mean(v[:2]) if len(v) >= 2 else np.nan)
-        peak_so_far.append(best_run(v6) if len(v) else np.nan)
-        imm_so_far.append(np.mean(v[:2]) if len(v) else np.nan)
-    df['peak_vorp'] = peak
-    df['imm_vorp'] = imm
-    df['peak_vorp_so_far'] = peak_so_far
-    df['imm_vorp_so_far'] = imm_so_far
+        s = seasons[seasons['person_id'] == p['person_id']].sort_values('k')
+        raw, v = s['vorp'].values, s['vorp_floor'].values
+        bpm, mp = s['bpm'].fillna(REPLACEMENT_BPM).values, s['mp'].values
+        full = len(v) >= PEAK_SEASONS
+        r = {'peak_vorp': best_run(v[:PEAK_SEASONS]) if full else np.nan,
+             'imm_vorp': np.mean(v[:2]) if len(v) >= 2 else np.nan,
+             'peak_vorp_so_far': best_run(v[:PEAK_SEASONS]) if len(v) else np.nan,
+             'imm_vorp_so_far': np.mean(v[:2]) if len(v) else np.nan,
+             # the rookie year is left out here, it says much less about later seasons than year two does
+             'peak_bpm': best_bpm_run(bpm[1:PEAK_SEASONS], mp[1:PEAK_SEASONS]) if full else np.nan,
+             'peak_bpm_so_far': best_bpm_run(bpm[1:PEAK_SEASONS], mp[1:PEAK_SEASONS]) if len(v) >= 2 else np.nan,
+             # the v3 versions, before the floor, kept so the change can be checked
+             'peak_vorp_v3': best_run(raw[:PEAK_SEASONS]) if full else np.nan,
+             'imm_vorp_v3': np.mean(raw[:2]) if len(raw) >= 2 else np.nan}
+        rows.append(r)
+    t = pd.DataFrame(rows, index=df.index)
+    for c in t.columns:
+        df[c] = t[c]
     df['peak_complete'] = df['peak_vorp'].notna()
     df['imm_complete'] = df['imm_vorp'].notna()
     df['peak_rating'] = (10 * df['peak_vorp'] / PEAK_SCALE).clip(-10, 10).round(2)
