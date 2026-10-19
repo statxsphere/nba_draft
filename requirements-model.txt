@@ -1,4 +1,4 @@
-# V3 engine: build_dataset.py, train.py, predict.py (tested on python 3.12)
+# V4 engine: build_dataset.py, rapm.py, train.py, predict.py (tested on python 3.12)
 # the streamlit app only needs requirements.txt
 pandas==2.3.3
 numpy==2.5.4
@@ -9,3 +9,4 @@ scipy==1.18.1
 scikit-learn==1.9.1
 lightgbm==4.7.0
 shap==0.54.1
+optuna==4.5.0
