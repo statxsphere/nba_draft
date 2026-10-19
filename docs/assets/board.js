@@ -211,6 +211,11 @@ function ratingCard(p, key) {
     '<div class="actual">' + actLine + '</div></div>';
 }
 
+function places(x) {
+  var n = Math.max(1, Math.abs(Math.round(x)));
+  return n + (n === 1 ? ' place' : ' places');
+}
+
 function driverList(p, key) {
   var list = p.pred[key].drivers;
   if (!list.length) return '<p class="muted small">No drivers saved for this one.</p>';
@@ -221,13 +226,13 @@ function driverList(p, key) {
     var bar = d.pctl >= 0 ? 'left:50%;width:' + w + '%' : 'right:50%;width:' + w + '%';
     return '<div class="driver"><div class="what"><b>' + esc(d.label) + '</b> <span>' + esc(d.value) + '</span></div>' +
       '<div class="bar"><span class="mid"></span><i style="' + bar + ';background:' + color + '"></i></div>' +
-      '<div class="eff">' + signed(d.pctl, 0) + '</div></div>';
+      '<div class="eff">' + signed(d.pctl, Math.abs(d.pctl) < 1 ? 1 : 0) + '</div></div>';
   }).join('');
   var up = list.filter(function (d) { return d.pctl > 0; })[0];
   var down = list.filter(function (d) { return d.pctl < 0; })[0];
   var words = [];
-  if (up) words.push('The biggest push up is ' + up.label.toLowerCase() + ' (' + up.value + '), which moves him about ' + Math.round(up.pctl) + ' places up a 100-player class.');
-  if (down) words.push('The biggest drag is ' + down.label.toLowerCase() + ' (' + down.value + '), about ' + Math.abs(Math.round(down.pctl)) + ' places down.');
+  if (up) words.push('The biggest push up is ' + up.label.toLowerCase() + ' (' + up.value + '), which moves him about ' + places(up.pctl) + ' up a 100-player class.');
+  if (down) words.push('The biggest drag is ' + down.label.toLowerCase() + ' (' + down.value + '), about ' + places(down.pctl) + ' down.');
   return '<div class="drivers">' + rows + '</div><p class="plain">' + esc(words.join(' ')) + '</p>';
 }
 
