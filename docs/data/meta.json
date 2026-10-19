@@ -91,14 +91,34 @@
   "peak": 4.0,
   "imm": 2.0
  },
+ "targets": [
+  "peak",
+  "imm",
+  "bpm",
+  "rapm",
+  "imm_rapm"
+ ],
+ "names": {
+  "peak": "Peak Impact",
+  "imm": "Immediate Impact",
+  "bpm": "Peak BPM",
+  "rapm": "Peak RAPM",
+  "imm_rapm": "Immediate RAPM"
+ },
  "last_complete": {
   "peak": 2020,
-  "imm": 2024
+  "imm": 2024,
+  "bpm": 2020,
+  "rapm": 2020,
+  "imm_rapm": 2024
  },
  "last_nba_season": "2025-26",
  "players": 1602,
  "train_players": {
   "peak": 960,
-  "imm": 1194
+  "imm": 1194,
+  "bpm": 960,
+  "rapm": 960,
+  "imm_rapm": 1074
  }
 }

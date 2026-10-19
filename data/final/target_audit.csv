@@ -1,0 +1,8 @@
+target,draft_order_spearman,players,never_played_rank,played_500_rank,share_below_zero
+"Immediate, v3 coding",0.0588,894,0.5833,0.4417,0.4776
+"Immediate, floored",0.4162,894,0.3083,0.6583,0.0
+"Peak, v3 coding",0.447,660,0.3,0.6667,0.0939
+"Peak, floored",0.568,660,0.25,0.6667,0.0
+Peak BPM,0.5089,660,0.2333,0.6667,
+Peak RAPM,0.4702,660,0.2083,0.6667,
+Immediate RAPM,0.2611,894,0.25,0.65,
