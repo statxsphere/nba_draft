@@ -37,6 +37,8 @@ LEVEL = 0.8            # the ranges are 80% intervals
 
 TARGETS = {'peak': 'peak_vorp', 'imm': 'imm_vorp', 'bpm': 'peak_bpm'}
 FLOORS = {'peak': 0.0, 'imm': 0.0, 'bpm': -2.0}   # replacement level for each target
+HURDLE = ['bpm']         # per possession targets, where the two part model is tried
+MIN_FLOOR = 1500         # nba minutes in seasons 2 to 6 that count as reaching the league
 
 # the v3 settings and inputs, kept as the "before" line
 V3_PARAMS = dict(n_estimators=400, learning_rate=0.02, num_leaves=7, min_child_samples=20,
@@ -66,7 +68,7 @@ def class_rank(y, years):
 # ---------- the two models and the blend ----------
 
 def ridge_model(alpha):
-    return make_pipeline(SimpleImputer(strategy='median', add_indicator=True), StandardScaler(), Ridge(alpha=alpha))
+    return make_pipeline(SimpleImputer(strategy='median', add_indicator=True, keep_empty_features=True), StandardScaler(), Ridge(alpha=alpha))
 
 
 def gbm_model(params, feats):
@@ -217,11 +219,70 @@ def ranges(score, m):
 def to_vorp(score, m):
     xs, ys = np.asarray(m['score']), np.asarray(m['vorp'])
     mid = np.interp(score, xs, ys)
-    # keep the last slope going past the top slice so the best prospects don't all tie
-    slope = (ys[-1] - ys[-2]) / (xs[-1] - xs[-2])
+    # keep the slope of the top few slices going past the last one so the best prospects don't all tie
+    slope = (ys[-1] - ys[-4]) / (xs[-1] - xs[-4])
     mid = np.where(score > xs[-1], ys[-1] + slope * (score - xs[-1]), mid)
     low, high = ranges(score, m)
     return mid, np.minimum(low, mid), np.maximum(high, mid)
+
+
+# ---------- two other heads, tried against the blend ----------
+
+def pct_in_class(score, years):
+    return pd.Series(score).groupby(np.asarray(years)).rank(pct=True).values
+
+
+def fit_ranker(train, target, feats, gbm):
+    # lambdarank with each draft class as one query, so it only ever learns the order inside a class
+    p = {k: v for k, v in gbm.items() if k != 'age_monotone'}
+    p['subsample'] = 1.0
+    t = train.sort_values('draft_year')
+    rel = (class_rank(t[target], t['draft_year']) * 9.999).astype(int)
+    model = lgb.LGBMRanker(objective='lambdarank', **p)
+    return model.fit(t[feats], rel, group=t.groupby('draft_year').size().values)
+
+
+def rank_blend_weights(train, target, feats, params):
+    # weights on the gbm, ridge and ranker from the inner classes, all three put on the same class percentile scale
+    folds = inner_folds(train, target)
+    parts = []
+    for a, ya, b, yb in folds:
+        g = gbm_model(params['gbm'], feats).fit(a[feats], ya).predict(b[feats])
+        r = ridge_model(params['alpha']).fit(a[feats], ya).predict(b[feats])
+        k = fit_ranker(a, target, feats, params['gbm']).predict(b[feats])
+        parts.append([pd.Series(x).rank(pct=True).values for x in [g, r, k]])
+    best = None
+    for wg in WEIGHTS:
+        for wr in WEIGHTS:
+            if wg + wr > 1.001:
+                continue
+            w = (wg, wr, 1 - wg - wr)
+            rho = mean_rho([w[0] * p[0] + w[1] * p[1] + w[2] * p[2] for p in parts], folds)
+            if best is None or rho > best[1]:
+                best = (w, rho)
+    return best[0]
+
+
+def fit_hurdle(train, target, feats, params, floor):
+    # two parts: does he reach the league (1500 minutes in seasons 2 to 6), and how good is he if he does
+    from sklearn.linear_model import LogisticRegressionCV
+    reached = (train['nba_min_2_6'] >= MIN_FLOOR).astype(int)
+    p = {k: v for k, v in params['gbm'].items() if k != 'age_monotone'}
+    clf_g = lgb.LGBMClassifier(**p).fit(train[feats], reached)
+    clf_r = make_pipeline(SimpleImputer(strategy='median', add_indicator=True, keep_empty_features=True), StandardScaler(),
+                          LogisticRegressionCV(Cs=7, cv=5)).fit(train[feats], reached)
+    on = train[reached == 1]
+    reg_g = gbm_model(params['gbm'], feats).fit(on[feats], on[target])
+    reg_r = ridge_model(params['alpha']).fit(on[feats], on[target])
+    return {'clf': (clf_g, clf_r), 'reg': (reg_g, reg_r), 'w': params['w'], 'floor': floor, 'feats': feats}
+
+
+def predict_hurdle(h, X):
+    X = X[h['feats']]
+    w = h['w']
+    p = w * h['clf'][0].predict_proba(X)[:, 1] + (1 - w) * h['clf'][1].predict_proba(X)[:, 1]
+    e = w * h['reg'][0].predict(X) + (1 - w) * h['reg'][1].predict(X)
+    return p * e + (1 - p) * h['floor'], p
 
 
 # ---------- his 2021 approach ----------
@@ -339,27 +400,43 @@ def one_class(df, feats, key, year):
     md = conformal(-train['log_pick'].values, y.values, years, FLOORS[key])
     test['draft_low'], test['draft_high'] = ranges(-test['log_pick'].values, md)
 
+    # the ranking head, on its own and in a three way blend
+    test['model_lambdarank'] = fit_ranker(train, target, feats, params['gbm']).predict(test[feats])
+    w3 = rank_blend_weights(train, target, feats, params)
+    g, r = predict_parts(fitted, test)
+    parts = [pct_in_class(x, test['draft_year']) for x in [g, r, test['model_lambdarank'].values]]
+    test['model_rank_blend'] = w3[0] * parts[0] + w3[1] * parts[1] + w3[2] * parts[2]
+    cols = ['score', 'model_gbm', 'model_ridge', 'model_pick', 'model_lambdarank', 'model_rank_blend']
+    if key in HURDLE:
+        h = fit_hurdle(train, target, feats, params, FLOORS[key])
+        test['model_hurdle'], test['p_reach'] = predict_hurdle(h, test)
+        cols.append('model_hurdle')
+
     v3 = lgb.LGBMRegressor(**V3_PARAMS).fit(train[V3_FEATURES], class_rank(y, train['draft_year']))
     test['v3'] = v3.predict(test[V3_FEATURES])
     test['v1_average'] = predict_v1(fit_v1(train[V3_FEATURES], y), test[V3_FEATURES])
     test['draft_order'] = -test['pick']
 
     metrics = []
-    cols = ['score', 'model_gbm', 'model_ridge', 'model_pick', 'v3', 'v1_average', 'draft_order']
+    cols += ['v3', 'v1_average', 'draft_order']
     for r in class_metrics(test, key, cols):
         r['model'] = 'model' if r['model'] == 'score' else r['model']
         r.update({'target': key, 'year': year, 'n': len(test)})
+        lo, hi = {'model': ('low', 'high'), 'model_pick': ('pick_low', 'pick_high'),
+                  'draft_order': ('draft_low', 'draft_high')}.get(r['model'], (None, None))
+        if lo:
+            r['coverage'] = ((test[target] >= test[lo]) & (test[target] <= test[hi])).mean()
+            r['width'] = (test[hi] - test[lo]).mean()
         metrics.append(r)
-    for i, lo, hi in [(0, 'low', 'high'), (3, 'pick_low', 'pick_high'), (6, 'draft_low', 'draft_high')]:
-        metrics[i]['coverage'] = ((test[target] >= test[lo]) & (test[target] <= test[hi])).mean()
-        metrics[i]['width'] = (test[hi] - test[lo]).mean()
 
     drivers = shap_rows(blend_shap(fitted, test), test[feats], test, key)
     test['target'] = key
     test['actual'] = test[target]
-    preds = test[['person_id', 'name', 'draft_year', 'pick', 'target', 'actual', 'score', 'model', 'low', 'high',
-                  'model_gbm', 'model_ridge', 'model_pick', 'pick_low', 'pick_high', 'draft_low', 'draft_high', 'v3', 'v1_average']]
-    tuned = dict(params['gbm'], alpha=params['alpha'], w=params['w'], w_pick=pick['w'],
+    keep = ['person_id', 'name', 'draft_year', 'pick', 'target', 'actual', 'score', 'model', 'low', 'high',
+            'model_gbm', 'model_ridge', 'model_pick', 'pick_low', 'pick_high', 'draft_low', 'draft_high',
+            'model_lambdarank', 'model_rank_blend', 'model_hurdle', 'p_reach', 'v3', 'v1_average']
+    preds = test.reindex(columns=keep)
+    tuned = dict(params['gbm'], alpha=params['alpha'], w=params['w'], w_pick=pick['w'], w_rank=str(w3),
                  gbm_inner=params['gbm_inner'], ridge_inner=params['ridge_inner'],
                  blend_inner=params['blend_inner'], target=key, year=year)
     r = {x['model']: x['spearman'] for x in metrics}

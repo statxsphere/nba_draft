@@ -4,7 +4,7 @@ import json
 import numpy as np
 import pandas as pd
 
-from build_dataset import rates, pos_group, RATE_STATS, EXPOSURE, COUNTS, TEAM_COUNTS
+from build_dataset import rates, pos_group, RATE_STATS, EXPOSURE, COUNTS, TEAM_COUNTS, SHOT_COUNTS
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 FINAL = os.path.join(ROOT, 'data', 'final')
@@ -17,8 +17,8 @@ COMBINE = ['wingspan', 'reach', 'vertical', 'agility', 'sprint']
 # weights on the last three college seasons, newest first
 SEASON_WEIGHTS = {'last': [1, 0, 0], 'new': [5, 3, 2], 'old': [2, 3, 5]}
 
-# what v4 uses, picked with ablation.py. only the season weighting helped, the rest stays switched off
-OPTIONS = dict(seasons='new', schedule=False, shrink=False, age=False, position=False, flags=False)
+# what v4 uses, picked with ablation.py. the season weighting and shot types helped, the rest stays switched off
+OPTIONS = dict(seasons='new', schedule=False, shrink=False, age=False, position=False, flags=False, shots=True)
 
 AGE_REF = 20.0
 MIN_MINUTES = 100
@@ -41,7 +41,7 @@ def pooled(seasons, df, scheme):
     s['w'] = s['back'].map(lambda b: w[b] if b < 3 else 0)
     n_seasons = s.groupby('person_id').size()
     s = s[s['w'] > 0]
-    cols = COUNTS + TEAM_COUNTS + ['games']
+    cols = COUNTS + TEAM_COUNTS + SHOT_COUNTS + ['games']
     tot = s[cols].multiply(s['w'], axis=0).groupby(s['person_id']).sum()
     wm = s['w'] * s['min']
     for c in ['sos', 'team_rating', 'back']:
@@ -110,8 +110,30 @@ def flags_step(c):
     return ['no_combine', 'no_athletic', 'm_college_seasons']
 
 
+def shots_step(c):
+    # shot types from play by play, only when it has most of his shots (from 2013-14 on, patchy before)
+    f, t = c['f'], c['tot']
+    ok = t['pbp_fga'] >= 0.5 * t['fga']
+    shots = pd.DataFrame(index=t.index)
+    shots['rim_rate'] = t['rim_fga'] / t['pbp_fga']
+    shots['mid_rate'] = t['mid_fga'] / t['pbp_fga']
+    shots['dunk_rate'] = t['dunk_fga'] / t['pbp_fga']
+    shots['assisted_share'] = t['fgm_assisted'] / t['pbp_fgm']
+    for kind in ['rim', 'mid']:
+        # small samples pulled toward the d1 average that season
+        prior = c['season_prior'][kind + '_pct'].reindex(t.index).values
+        k = c['adj']['shrink_k'][kind + '_pct']
+        shots[kind + '_pct'] = (t[kind + '_fgm'] + k * prior) / (t[kind + '_fga'] + k)
+    shots = shots.where(ok).reindex(c['df']['person_id'].values)
+    for col in SHOT_FEATURES:
+        f[col] = shots[col].values
+    return ['m_' + col for col in SHOT_FEATURES]
+
+
+SHOT_FEATURES = ['rim_rate', 'mid_rate', 'dunk_rate', 'rim_pct', 'mid_pct', 'assisted_share']
+
 STEPS = [('schedule', schedule_step), ('shrink', shrink_step), ('age', age_step),
-         ('position', position_step), ('flags', flags_step)]
+         ('position', position_step), ('flags', flags_step), ('shots', shots_step)]
 
 
 def make_features(df, options=None):
@@ -132,13 +154,16 @@ def make_features(df, options=None):
     prior = key.merge(priors, on=['college_season', 'pos'], how='left')
     prior.index = df.index
 
-    context = {'df': df, 'f': f, 'prior': prior, 'n': n, 'adj': adj}
+    last = df[df['espn_id'].notna()].set_index('person_id')['college_season']
+    season_prior = priors[priors['pos'] == 'all'].set_index('college_season')[['rim_pct', 'mid_pct']]
+    season_prior = season_prior.reindex(last.values).set_index(last.index)
+    context = {'df': df, 'f': f, 'prior': prior, 'n': n, 'adj': adj, 'tot': tot, 'season_prior': season_prior}
     extra = []
     for name, step in STEPS:
         if o.get(name):
             extra += step(context)
 
-    for c in COLLEGE + ['sos', 'team_rating', 'college_seasons']:
+    for c in COLLEGE + ['sos', 'team_rating', 'college_seasons'] + [x for x in SHOT_FEATURES if x in f]:
         df['m_' + c] = f[c]
     feats = BASE + ['m_' + c for c in COLLEGE] + extra
     if 'm_sos' not in extra:

@@ -28,6 +28,8 @@ HEADERS = {'User-Agent': 'nba_draft data script (github.com/statxsphere/nba_draf
 
 BBREF_DATA = 'https://raw.githubusercontent.com/sumitrodatta/bball-reference-datasets/master/Data/'
 ESPN_BOX = 'https://github.com/sportsdataverse/sportsdataverse-data/releases/download/espn_mens_college_basketball_player_boxscores/'
+ESPN_PBP = 'https://github.com/sportsdataverse/sportsdataverse-data/releases/download/espn_mens_college_basketball_pbp/'
+FIRST_PBP_SEASON = 2014       # espn play by play has shot types from 2005-06, but before 2013-14 it is mostly made shots only
 
 # names that espn and nba.com spell too differently to match automatically
 NAME_FIXES = {
@@ -288,7 +290,9 @@ def add_targets(df, seasons):
              'peak_bpm_so_far': best_bpm_run(bpm[1:PEAK_SEASONS], mp[1:PEAK_SEASONS]) if len(v) >= 2 else np.nan,
              # the v3 versions, before the floor, kept so the change can be checked
              'peak_vorp_v3': best_run(raw[:PEAK_SEASONS]) if full else np.nan,
-             'imm_vorp_v3': np.mean(raw[:2]) if len(raw) >= 2 else np.nan}
+             'imm_vorp_v3': np.mean(raw[:2]) if len(raw) >= 2 else np.nan,
+             # minutes, for the two part model: did he reach the league at all
+             'nba_min_2_6': mp[1:PEAK_SEASONS].sum() if full else np.nan}
         rows.append(r)
     t = pd.DataFrame(rows, index=df.index)
     for c in t.columns:
@@ -309,6 +313,33 @@ PER40 = ['pts', 'orb', 'drb', 'ast', 'stl', 'blk', 'tov', 'pf', 'fga', 'fg3a', '
 # stats that get the schedule adjustment, with what each game is weighted by
 GAME_STATS = {c + '40': 'min' for c in PER40}
 GAME_STATS.update({'ts': 'tsa', 'fg3_pct': 'fg3a', 'ft_pct': 'fta'})
+
+
+SHOT_COUNTS = ['pbp_fga', 'rim_fga', 'rim_fgm', 'mid_fga', 'mid_fgm', 'dunk_fga', 'pbp_fgm', 'fgm_assisted']
+RIM = ['LayUpShot', 'DunkShot', 'TipShot']
+
+
+def shot_splits(year):
+    # shot types from espn play by play: layups, dunks and tips are at the rim, other twos are mid range
+    path = get_file(ESPN_PBP + f'play_by_play_{year}.parquet', f'espn_pbp_{year}.parquet')
+    d = pd.read_parquet(path, columns=['type_text', 'shooting_play', 'scoring_play', 'score_value',
+                                       'athlete_id_1', 'athlete_id_2'])
+    d = d[(d['shooting_play'] == True) & (d['score_value'] > 1) & d['athlete_id_1'].notna()].copy()
+    made = d['scoring_play'] == True
+    rim = d['type_text'].isin(RIM)
+    mid = ~rim & (d['score_value'] == 2)
+    d['pbp_fga'] = 1
+    d['pbp_fgm'] = made.astype(int)
+    d['rim_fga'] = rim.astype(int)
+    d['rim_fgm'] = (rim & made).astype(int)
+    d['mid_fga'] = mid.astype(int)
+    d['mid_fgm'] = (mid & made).astype(int)
+    d['dunk_fga'] = (d['type_text'] == 'DunkShot').astype(int)
+    # the second player on a made shot is the passer, this matches "Assisted by" in the text 99.9% of the time
+    d['fgm_assisted'] = (made & d['athlete_id_2'].notna()).astype(int)
+    out = d.groupby('athlete_id_1')[SHOT_COUNTS].sum()
+    out.index = out.index.astype(float)
+    return out
 
 
 def team_ratings(box):
@@ -524,6 +555,20 @@ def college_priors(totals):
         d = pairs[c + '_next'] - pairs[c]
         ok = d.notna()
         deltas[c] = float(np.average(d[ok], weights=w[ok]))
+    # shot types: d1 average make rate at the rim and from mid range each season, and how hard to shrink
+    shots = pd.concat([t.assign(college_season=y) for y, t in totals.items() if 'rim_fga' in t])
+    shots = shots[(shots['min'] >= 300) & (shots['pbp_fga'] >= 0.8 * shots['fga'])]
+    for kind in ['rim', 'mid']:
+        a, m = shots[kind + '_fga'], shots[kind + '_fgm']
+        rate = (m.groupby(shots['college_season']).sum() / a.groupby(shots['college_season']).sum())
+        # seasons with only a few covered players get the overall rate
+        enough = shots.groupby('college_season').size() >= 200
+        rate = rate[enough.reindex(rate.index).fillna(False)]
+        priors[kind + '_pct'] = priors['college_season'].map(rate).fillna(m.sum() / a.sum())
+        x = (m / a)[a >= 30]
+        p = x.mean()
+        true_var = x.var() - (p * (1 - p) / a[a >= 30]).mean()
+        k[kind + '_pct'] = float(p * (1 - p) / true_var)
     print(f'  priors from {len(d1)} d1 player-seasons, {len(pairs)} back to back pairs')
     return priors, k, deltas
 
@@ -531,12 +576,12 @@ def college_priors(totals):
 def match_history(college, totals):
     # every earlier d1 season for the matched players, by espn's athlete id
     keep = ['person_id', 'college_season', 'athlete_id', 'team_display_name', 'athlete_position_abbreviation',
-            'games'] + COUNTS + TEAM_COUNTS + ['sos', 'team_rating', 'team_margin', 'team_srs']
+            'games'] + COUNTS + TEAM_COUNTS + ['sos', 'team_rating', 'team_margin', 'team_srs'] + SHOT_COUNTS
     frames = []
     for year in range(FIRST_COLLEGE_SEASON, LAST_DRAFT + 1):
         t = totals[year]
         c = college[college['college_season'] >= year][['person_id', 'espn_id']]
-        hit = t.merge(c, left_on='athlete_id', right_on='espn_id')
+        hit = t.merge(c, left_on='athlete_id', right_on='espn_id').reindex(columns=list(t.columns) + ['person_id'])
         frames.append(hit)
     h = pd.concat(frames)[keep].rename(columns={'athlete_id': 'espn_id', 'team_display_name': 'espn_team',
                                                 'athlete_position_abbreviation': 'espn_pos'})
@@ -628,6 +673,8 @@ def main():
     for year in range(FIRST_COLLEGE_SEASON, LAST_DRAFT + 1):
         totals[year], sl = college_season(year)
         slope_sums.append(sl)
+        if year >= FIRST_PBP_SEASON:
+            totals[year] = totals[year].join(shot_splits(year), on='athlete_id')
         seasons[year] = college_features(totals[year])
         print(f'  {year}: {len(seasons[year])} players')
     college = match_college(df, seasons)

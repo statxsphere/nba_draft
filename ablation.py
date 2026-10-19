@@ -12,8 +12,9 @@ from train import (load_data, fit_blend, predict_parts, TARGETS, FIRST_TEST, V3_
 
 FIXED = {'gbm': dict(V3_PARAMS), 'alpha': 30, 'w': 0.5}
 
-V3 = dict(seasons='last', schedule=False, shrink=False, age=False, position=False, flags=False)
-FULL = dict(seasons='last', schedule=True, shrink=True, age=True, position=True, flags=True)
+V3 = dict(seasons='last', schedule=False, shrink=False, age=False, position=False, flags=False, shots=False)
+FULL = dict(seasons='last', schedule=True, shrink=True, age=True, position=True, flags=True, shots=True)
+CHOSEN = dict(V3, seasons='new')   # without shot types, which are tested on top of it
 
 RUNS = {
     'v3 inputs': V3,
@@ -24,14 +25,18 @@ RUNS = {
     '+ combine flags': dict(V3, flags=True),
     '+ seasons 5/3/2 newest': dict(V3, seasons='new'),
     '+ seasons 2/3/5 oldest': dict(V3, seasons='old'),
+    '+ shot types': dict(V3, shots=True),
     'all': FULL,
     'all - schedule': dict(FULL, schedule=False),
     'all - shrinkage': dict(FULL, shrink=False),
     'all - age adjusted': dict(FULL, age=False),
     'all - position relative': dict(FULL, position=False),
     'all - combine flags': dict(FULL, flags=False),
+    'all - shot types': dict(FULL, shots=False),
     'all, seasons 5/3/2 newest': dict(FULL, seasons='new'),
     'all, seasons 2/3/5 oldest': dict(FULL, seasons='old'),
+    'chosen': CHOSEN,
+    'chosen + shot types': dict(CHOSEN, shots=True),
 }
 
 
@@ -67,6 +72,7 @@ def main():
     out = []
     for name in RUNS:
         base = 'v3 inputs' if not name.startswith('all') or name == 'all' else 'all'
+        base = 'chosen' if name.startswith('chosen') else base
         a = res[res['run'] == name].set_index(['target', 'year'])
         b = res[res['run'] == base].set_index(['target', 'year'])
         r = {'run': name, 'compared_with': base}
@@ -77,9 +83,15 @@ def main():
         r['mean_change'] = (a['blend'] - b['blend']).mean()
         r['classes_better'] = int((a['blend'] > b['blend']).sum())
         r['classes'] = len(a)
+        # shot types only exist from the 2014 class on, so they are also judged on those classes alone
+        late = a.index.get_level_values('year') >= 2014
+        r['change_2014_on'] = (a['blend'] - b['blend'])[late].mean()
+        r['better_2014_on'] = int((a['blend'] > b['blend'])[late].sum())
+        r['classes_2014_on'] = int(late.sum())
         out.append(r)
     out = pd.DataFrame(out)
-    print(out[['run', 'compared_with', 'mean_blend', 'mean_change', 'classes_better', 'classes']].round(3).to_string(index=False))
+    print(out[['run', 'compared_with', 'mean_blend', 'mean_change', 'classes_better', 'classes', 'change_2014_on',
+               'better_2014_on', 'classes_2014_on']].round(3).to_string(index=False))
     out.round(4).to_csv(os.path.join(FINAL, 'ablation.csv'), index=False)
 
 
