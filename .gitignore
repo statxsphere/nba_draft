@@ -1,0 +1,27 @@
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# environments
+.venv/
+venv/
+env/
+.env
+
+# jupyter
+.ipynb_checkpoints/
+
+# saved models from the notebook
+*.pkl
+
+# streamlit
+.streamlit/secrets.toml
+
+# editors and os
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
