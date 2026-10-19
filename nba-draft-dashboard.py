@@ -84,6 +84,8 @@ if search_query:
 
 # Main content
 st.title("NBA Draft Prospect Dashboard")
+st.caption("This is V2 (2023 and 2024 classes). V3, with every class since 2010 and a backtest against the real draft order, "
+           "is at https://statxsphere.github.io/nba_draft/")
 
 for i, player in df.iterrows():
     with st.container():
