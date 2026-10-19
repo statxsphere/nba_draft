@@ -17,6 +17,8 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import RobustScaler
 from sklearn.svm import SVR
 
+from features import make_features
+
 warnings.filterwarnings('ignore')
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
@@ -29,12 +31,6 @@ FIRST_TEST = 2010
 INNER_CLASSES = 3      # tuning only ever looks at the last 3 classes before the test class
 TRIALS = 40
 
-FEATURES = ['age', 'height', 'weight', 'wingspan', 'wing_diff', 'reach', 'vertical', 'agility', 'sprint',
-            'pos_g', 'pos_f', 'pos_c', 'bg_college', 'bg_international', 'bg_high', 'bg_g',
-            'games', 'mpg', 'pts40', 'trb40', 'orb40', 'drb40', 'ast40', 'stl40', 'blk40', 'tov40', 'pf40',
-            'fga40', 'fg3a40', 'fta40', 'ts', 'efg', 'fg3_pct', 'ft_pct', 'fg3a_rate', 'fta_rate', 'usg',
-            'ast_pct', 'orb_pct', 'drb_pct', 'stl_pct', 'blk_pct', 'tov_pct', 'ast_tov', 'team_margin', 'team_srs']
-
 TARGETS = {'peak': 'peak_vorp', 'imm': 'imm_vorp', 'bpm': 'peak_bpm'}
 FLOORS = {'peak': 0.0, 'imm': 0.0, 'bpm': -2.0}   # replacement level for each target
 
@@ -44,13 +40,20 @@ V3_PARAMS = dict(n_estimators=400, learning_rate=0.02, num_leaves=7, min_child_s
                  random_state=7, verbose=-1, n_jobs=1)
 
 
-def load_data():
+def load_data(options=None):
     df = pd.read_csv(os.path.join(FINAL, 'draft_players.csv'))
-    # very low minute college seasons are mostly noise, so treat them like no stats at all
-    college_cols = FEATURES[16:]
+    df, feats = make_features(df, options)
     low = df['games'].fillna(0) * df['mpg'].fillna(0) < 100
-    df.loc[low, college_cols] = np.nan
-    return df[df['draft_year'] >= FIRST_TRAIN].reset_index(drop=True)
+    df.loc[low, V3_FEATURES[16:]] = np.nan
+    return df[df['draft_year'] >= FIRST_TRAIN].reset_index(drop=True), feats
+
+
+# the v3 inputs: last college season only, nothing adjusted
+V3_FEATURES = ['age', 'height', 'weight', 'wingspan', 'wing_diff', 'reach', 'vertical', 'agility', 'sprint',
+               'pos_g', 'pos_f', 'pos_c', 'bg_college', 'bg_international', 'bg_high', 'bg_g',
+               'games', 'mpg', 'pts40', 'trb40', 'orb40', 'drb40', 'ast40', 'stl40', 'blk40', 'tov40', 'pf40',
+               'fga40', 'fg3a40', 'fta40', 'ts', 'efg', 'fg3_pct', 'ft_pct', 'fg3a_rate', 'fta_rate', 'usg',
+               'ast_pct', 'orb_pct', 'drb_pct', 'stl_pct', 'blk_pct', 'tov_pct', 'ast_tov', 'team_margin', 'team_srs']
 
 
 def class_rank(y, years):
@@ -216,26 +219,26 @@ def shap_rows(model, X, test, key):
     return rows
 
 
-def one_class(df, key, year):
+def one_class(df, feats, key, year):
     target = TARGETS[key]
     done = df[df[target].notna()]
     train = done[done['draft_year'] < year]
     test = done[done['draft_year'] == year].copy()
-    X, y = train[FEATURES], train[target]
-    Xt = test[FEATURES]
+    X, y = train[feats], train[target]
+    Xt = test[feats]
 
-    params, inner = tune(train, target, FEATURES, seed=year)
+    params, inner = tune(train, target, feats, seed=year)
     fitted = fit_point(X, y, train['draft_year'], params)
     model = fitted[0]
     test['score'] = model.predict(Xt)
     test['model'], test['low'], test['high'] = to_vorp(test['score'].values, fitted[1])
 
-    v3 = lgb.LGBMRegressor(**V3_PARAMS).fit(X, class_rank(y, train['draft_year']))
-    test['v3'] = v3.predict(Xt)
-    pick_params = dict(params, monotone_constraints=[0] * len(FEATURES) + [-1])
-    with_pick = lgb.LGBMRegressor(**pick_params).fit(train[FEATURES + ['pick']], class_rank(y, train['draft_year']))
-    test['model_pick'] = with_pick.predict(test[FEATURES + ['pick']])
-    test['v1_average'] = predict_v1(fit_v1(X, y), Xt)
+    v3 = lgb.LGBMRegressor(**V3_PARAMS).fit(train[V3_FEATURES], class_rank(y, train['draft_year']))
+    test['v3'] = v3.predict(test[V3_FEATURES])
+    pick_params = dict(params, monotone_constraints=[0] * len(feats) + [-1])
+    with_pick = lgb.LGBMRegressor(**pick_params).fit(train[feats + ['pick']], class_rank(y, train['draft_year']))
+    test['model_pick'] = with_pick.predict(test[feats + ['pick']])
+    test['v1_average'] = predict_v1(fit_v1(train[V3_FEATURES], y), test[V3_FEATURES])
     test['draft_order'] = -test['pick']
 
     metrics = []
@@ -254,16 +257,16 @@ def one_class(df, key, year):
     return preds, pd.DataFrame(metrics), pd.DataFrame(drivers), dict(params, target=key, year=year)
 
 
-def final_models(df, key):
+def final_models(df, feats, key):
     target = TARGETS[key]
     done = df[df[target].notna()]
-    X, y = done[FEATURES], done[target]
-    params, _ = tune(done, target, FEATURES, seed=1)
+    X, y = done[feats], done[target]
+    params, _ = tune(done, target, feats, seed=1)
     model, m = fit_point(X, y, done['draft_year'], params)
     model.booster_.save_model(os.path.join(MODELS, f'{key}_model.txt'))
     with open(os.path.join(MODELS, f'{key}_vorp_map.json'), 'w') as f:
         json.dump({k: v.tolist() for k, v in m.items()}, f)
-    imp = pd.DataFrame({'feature': FEATURES, 'gain': model.booster_.feature_importance('gain')})
+    imp = pd.DataFrame({'feature': feats, 'gain': model.booster_.feature_importance('gain')})
     imp['gain'] = imp['gain'] / imp['gain'].sum()
     sv = shap.TreeExplainer(model).shap_values(X)
     imp['mean_abs_shap'] = np.abs(sv).mean(axis=0)
@@ -294,8 +297,8 @@ def target_audit(df):
 
 def main():
     os.makedirs(MODELS, exist_ok=True)
-    df = load_data()
-    print(f'{len(df)} players drafted since {FIRST_TRAIN}')
+    df, feats = load_data()
+    print(f'{len(df)} players drafted since {FIRST_TRAIN}, {len(feats)} features')
     target_audit(df).round(4).to_csv(os.path.join(FINAL, 'target_audit.csv'), index=False)
 
     jobs = []
@@ -303,12 +306,12 @@ def main():
         last = int(df[df[TARGETS[key]].notna()]['draft_year'].max())
         jobs += [(key, year) for year in range(FIRST_TEST, last + 1)]
     print(f'nested backtest, {len(jobs)} test classes..')
-    out = Parallel(n_jobs=min(len(jobs), 24))(delayed(one_class)(df, key, year) for key, year in jobs)
+    out = Parallel(n_jobs=min(len(jobs), 24))(delayed(one_class)(df, feats, key, year) for key, year in jobs)
 
     print('final models..')
     all_imp, last_year = [], {}
     for key in TARGETS:
-        imp, last = final_models(df, key)
+        imp, last = final_models(df, feats, key)
         all_imp.append(imp)
         last_year[key] = last
 
@@ -320,7 +323,7 @@ def main():
     pd.DataFrame([o[3] for o in out]).to_csv(os.path.join(FINAL, 'tuned_params.csv'), index=False)
     pd.concat(all_imp).round(5).to_csv(os.path.join(FINAL, 'feature_importance.csv'), index=False)
     with open(os.path.join(MODELS, 'info.json'), 'w') as f:
-        json.dump({'features': FEATURES, 'last_complete_class': last_year}, f, indent=2)
+        json.dump({'features': feats, 'last_complete_class': last_year}, f, indent=2)
 
     print('\naverage over the outer test classes:')
     summary = metrics.groupby(['target', 'model'])[['spearman', 'top10', 'ndcg10', 'coverage']].mean().round(3)
