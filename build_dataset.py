@@ -633,10 +633,18 @@ def match_college(df, seasons):
     return pd.DataFrame(rows)
 
 
+def cbbd_key():
+    # collegebasketballdata.com has recruiting ranks and porpag/usage splits, and its terms allow model
+    # training, but it needs a free api key. put it in CBBD_API_KEY to use it. not used yet
+    return os.environ.get('CBBD_API_KEY')
+
+
 def main():
     os.makedirs(os.path.join(RAW, 'nba_api'), exist_ok=True)
     os.makedirs(FINAL, exist_ok=True)
 
+    if cbbd_key() is None:
+        print('no CBBD_API_KEY, skipping collegebasketballdata')
     print('draft history..')
     df = get_draft()
     print(f'{len(df)} picks from {FIRST_DRAFT} to {LAST_DRAFT}')

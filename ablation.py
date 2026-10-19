@@ -11,6 +11,7 @@ from scipy.stats import spearmanr
 from train import (load_data, fit_blend, predict_parts, TARGETS, FIRST_TEST, V3_PARAMS, FINAL)
 
 FIXED = {'gbm': dict(V3_PARAMS), 'alpha': 30, 'w': 0.5}
+KEYS = ['peak', 'imm', 'bpm']   # the feature choices were made on these three, before the rapm targets existed
 
 V3 = dict(seasons='last', schedule=False, shrink=False, age=False, position=False, flags=False, shots=False)
 FULL = dict(seasons='last', schedule=True, shrink=True, age=True, position=True, flags=True, shots=True)
@@ -56,7 +57,7 @@ def main():
     for name, opts in RUNS.items():
         df, feats = load_data(opts)
         jobs = []
-        for key in TARGETS:
+        for key in KEYS:
             last = int(df[df[TARGETS[key]].notna()]['draft_year'].max())
             jobs += [(key, y) for y in range(FIRST_TEST, last + 1)]
         out = Parallel(n_jobs=24)(delayed(one)(df, feats, k, y) for k, y in jobs)
@@ -65,7 +66,7 @@ def main():
         rows += out
         t = pd.DataFrame(out).groupby('target')[['gbm', 'ridge', 'blend']].mean()
         print(f"{name:<28}" + '  '.join(f"{k} {t.loc[k, 'gbm']:.3f}/{t.loc[k, 'ridge']:.3f}/{t.loc[k, 'blend']:.3f}"
-                                       for k in TARGETS), flush=True)
+                                       for k in KEYS), flush=True)
     res = pd.DataFrame(rows)
 
     # classes won against the base of each comparison, on the blend
@@ -76,10 +77,10 @@ def main():
         a = res[res['run'] == name].set_index(['target', 'year'])
         b = res[res['run'] == base].set_index(['target', 'year'])
         r = {'run': name, 'compared_with': base}
-        for key in TARGETS:
+        for key in KEYS:
             for m in ['gbm', 'ridge', 'blend']:
                 r[f'{key}_{m}'] = a.loc[key, m].mean()
-        r['mean_blend'] = np.mean([r[f'{k}_blend'] for k in TARGETS])
+        r['mean_blend'] = np.mean([r[f'{k}_blend'] for k in KEYS])
         r['mean_change'] = (a['blend'] - b['blend']).mean()
         r['classes_better'] = int((a['blend'] > b['blend']).sum())
         r['classes'] = len(a)

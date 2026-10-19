@@ -35,9 +35,10 @@ ALPHAS = [1, 3, 10, 30, 100, 300, 1000]
 WEIGHTS = np.round(np.arange(0, 1.01, 0.1), 1)
 LEVEL = 0.8            # the ranges are 80% intervals
 
-TARGETS = {'peak': 'peak_vorp', 'imm': 'imm_vorp', 'bpm': 'peak_bpm'}
-FLOORS = {'peak': 0.0, 'imm': 0.0, 'bpm': -2.0}   # replacement level for each target
-HURDLE = ['bpm']         # per possession targets, where the two part model is tried
+# each target is just a column in draft_players.csv, plus its replacement level. a new one goes here
+TARGETS = {'peak': 'peak_vorp', 'imm': 'imm_vorp', 'bpm': 'peak_bpm', 'rapm': 'peak_rapm', 'imm_rapm': 'imm_rapm'}
+FLOORS = {'peak': 0.0, 'imm': 0.0, 'bpm': -2.0, 'rapm': -2.0, 'imm_rapm': -2.0}
+HURDLE = ['bpm', 'rapm']  # per possession targets, where the two part model is tried
 MIN_FLOOR = 1500         # nba minutes in seasons 2 to 6 that count as reaching the league
 
 # the v3 settings and inputs, kept as the "before" line
@@ -174,6 +175,8 @@ def oof_scores(train, target, feats, params):
     groups = train['draft_year'].values % 5
     for g in range(5):
         fold = groups == g
+        if not fold.any():
+            continue
         f = fit_blend(train[~fold], target, feats, params)
         oof[fold] = predict_blend(f, train[fold])
     return oof
@@ -192,7 +195,7 @@ def conformal(score, y, years, floor, level=LEVEL):
     # range covers far more than 80%, and this sorts that out
     cal = (years.max() - years) % 2 == 0
     need = np.ceil((cal.sum() + 1) * level) / cal.sum()
-    for t in np.arange(0.3, 1.001, 0.01):
+    for t in np.round(np.arange(0.3, 1.001, 0.01), 2):
         xs, lo = quantile_curve(score[~cal], y[~cal], (1 - t) / 2)
         _, hi = quantile_curve(score[~cal], y[~cal], (1 + t) / 2)
         inside = (y[cal] >= np.interp(score[cal], xs, lo)) & (y[cal] <= np.interp(score[cal], xs, hi))
@@ -472,7 +475,8 @@ def target_audit(df):
     mp2 = seasons[seasons['k'] <= 2].groupby('person_id')['mp'].sum()
     rows = []
     for col, label in [('imm_vorp_v3', 'Immediate, v3 coding'), ('imm_vorp', 'Immediate, floored'),
-                       ('peak_vorp_v3', 'Peak, v3 coding'), ('peak_vorp', 'Peak, floored'), ('peak_bpm', 'Peak BPM')]:
+                       ('peak_vorp_v3', 'Peak, v3 coding'), ('peak_vorp', 'Peak, floored'), ('peak_bpm', 'Peak BPM'),
+                       ('peak_rapm', 'Peak RAPM'), ('imm_rapm', 'Immediate RAPM')]:
         d = df[df[col].notna() & (df['draft_year'] >= FIRST_TEST)].copy()
         d['mp2'] = d['person_id'].map(mp2).fillna(0)
         d['r'] = d.groupby('draft_year')[col].rank(pct=True)
@@ -480,7 +484,7 @@ def target_audit(df):
         rows.append({'target': label, 'draft_order_spearman': rho, 'players': len(d),
                      'never_played_rank': d[d['mp2'] == 0]['r'].median(),
                      'played_500_rank': d[d['mp2'] >= 500]['r'].median(),
-                     'share_below_zero': (d[col] < 0).mean() if 'bpm' not in col else np.nan})
+                     'share_below_zero': (d[col] < 0).mean() if 'vorp' in col else np.nan})
     out = pd.DataFrame(rows)
     print(out.round(3).to_string(index=False))
     return out
